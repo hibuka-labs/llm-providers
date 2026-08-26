@@ -14,6 +14,12 @@ pub struct ChatResponse {
     /// Text content
     pub content: String,
 
+    /// Reasoning/thinking content (from StreamChunk::Thought)
+    pub reasoning_content: Option<String>,
+
+    /// Anthropic thinking signature for multi-turn conversations
+    pub thinking_signature: Option<String>,
+
     /// Tool call list
     pub tool_calls: Vec<ToolCall>,
 
@@ -79,10 +85,14 @@ pub enum StreamChunk {
     Text(String),
     /// Thinking process
     Thought(String),
+    /// Anthropic thinking signature (for multi-turn)
+    ThinkingSignature(String),
     /// Tool call
     ToolCall(Value),
     /// Usage information
     Usage(UsageInfo),
+    /// Stream error (from API error events)
+    Error(String),
     /// Stream end
     Stop {
         finish_reason: Option<String>,
@@ -144,6 +154,8 @@ impl ChatStream {
     /// multiple chunks (first has id+name, subsequent have only argument fragments).
     pub async fn collect_response(mut self) -> Result<ChatResponse, LlmError> {
         let mut content = String::new();
+        let mut reasoning_content = String::new();
+        let mut thinking_signature = None;
         let mut tool_call_buf: BTreeMap<usize, ToolCall> = BTreeMap::new();
         let mut usage = UsageInfo::default();
         let mut finish_reason = FinishReason::Stop;
@@ -151,10 +163,29 @@ impl ChatStream {
         while let Some(chunk) = self.next().await {
             match chunk? {
                 StreamChunk::Text(t) => content.push_str(&t),
+                StreamChunk::Thought(t) => reasoning_content.push_str(&t),
+                StreamChunk::ThinkingSignature(sig) => {
+                    thinking_signature = Some(sig);
+                }
                 StreamChunk::ToolCall(v) => {
                     apply_tool_call_delta(&mut tool_call_buf, &v);
                 }
-                StreamChunk::Usage(u) => usage = u,
+                StreamChunk::Usage(u) => {
+                    // Accumulate: only overwrite if new value is Some
+                    if u.prompt_tokens.is_some() {
+                        usage.prompt_tokens = u.prompt_tokens;
+                    }
+                    if u.completion_tokens.is_some() {
+                        usage.completion_tokens = u.completion_tokens;
+                    }
+                    if u.total_tokens.is_some() {
+                        usage.total_tokens = u.total_tokens;
+                    }
+                }
+                StreamChunk::Error(msg) => {
+                    // Stream error from API - propagate as LlmError
+                    return Err(LlmError::llm(msg));
+                }
                 StreamChunk::Stop {
                     finish_reason: Some(reason),
                 } => {
@@ -162,7 +193,6 @@ impl ChatStream {
                     break;
                 }
                 StreamChunk::Stop { .. } => break,
-                _ => {}
             }
         }
 
@@ -170,6 +200,12 @@ impl ChatStream {
 
         Ok(ChatResponse {
             content,
+            reasoning_content: if reasoning_content.is_empty() {
+                None
+            } else {
+                Some(reasoning_content)
+            },
+            thinking_signature,
             tool_calls,
             usage,
             finish_reason,
@@ -285,6 +321,8 @@ pub fn extract_tool_calls(value: &Value) -> Option<Vec<ToolCall>> {
 }
 
 /// Parse finish reason string to FinishReason enum.
+///
+/// Convenience wrapper around [`FinishReason::from_str`].
 pub fn parse_finish_reason(s: &str) -> FinishReason {
     FinishReason::from_str(s)
 }
@@ -419,6 +457,7 @@ mod tests {
         let response = stream.collect_response().await.unwrap();
 
         assert_eq!(response.content, "Hello world!");
+        assert!(response.reasoning_content.is_none());
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "call_1");
         assert_eq!(response.tool_calls[0].name, "shell");
@@ -427,6 +466,49 @@ mod tests {
         assert_eq!(response.usage.completion_tokens, Some(50));
         assert_eq!(response.usage.total_tokens, Some(150));
         assert_eq!(response.finish_reason, FinishReason::Stop);
+    }
+
+    #[tokio::test]
+    async fn collect_response_with_thought() {
+        let chunks = vec![
+            Ok(StreamChunk::Thought("thinking...".into())),
+            Ok(StreamChunk::Text("answer".into())),
+            Ok(StreamChunk::Stop {
+                finish_reason: Some("stop".into()),
+            }),
+        ];
+        let stream = ChatStream::new(Box::pin(futures_util::stream::iter(chunks)));
+        let response = stream.collect_response().await.unwrap();
+
+        assert_eq!(response.content, "answer");
+        assert_eq!(response.reasoning_content.as_deref(), Some("thinking..."));
+    }
+
+    #[tokio::test]
+    async fn collect_response_usage_accumulate() {
+        // Simulate Anthropic: message_start has prompt_tokens, message_delta has completion_tokens
+        let chunks = vec![
+            Ok(StreamChunk::Usage(UsageInfo {
+                prompt_tokens: Some(20),
+                completion_tokens: Some(0),
+                total_tokens: None,
+            })),
+            Ok(StreamChunk::Text("ok".into())),
+            Ok(StreamChunk::Usage(UsageInfo {
+                prompt_tokens: None,
+                completion_tokens: Some(7),
+                total_tokens: None,
+            })),
+            Ok(StreamChunk::Stop {
+                finish_reason: Some("end_turn".into()),
+            }),
+        ];
+        let stream = ChatStream::new(Box::pin(futures_util::stream::iter(chunks)));
+        let response = stream.collect_response().await.unwrap();
+
+        // prompt_tokens should be preserved from first Usage chunk
+        assert_eq!(response.usage.prompt_tokens, Some(20));
+        assert_eq!(response.usage.completion_tokens, Some(7));
     }
 
     #[tokio::test]
@@ -538,5 +620,55 @@ mod tests {
     fn extract_tool_calls_empty_array_returns_none() {
         let value = serde_json::json!([]);
         assert!(extract_tool_calls(&value).is_none());
+    }
+
+    // ── proptest: parse_finish_reason ──
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn from_str_never_panics(s in ".*") {
+                let _ = FinishReason::from_str(&s);
+            }
+
+            #[test]
+            fn from_str_known_values(
+                variant in proptest::sample::select(vec![
+                    ("stop", "Stop"),
+                    ("end_turn", "Stop"),
+                    ("length", "Length"),
+                    ("max_tokens", "Length"),
+                    ("tool_calls", "ToolCalls"),
+                    ("tool_use", "ToolCalls"),
+                    ("content_filter", "ContentFilter"),
+                ])
+            ) {
+                let (s, expected_name) = variant;
+                let fr = FinishReason::from_str(s);
+                match (expected_name, &fr) {
+                    ("Stop", FinishReason::Stop) => {}
+                    ("Length", FinishReason::Length) => {}
+                    ("ToolCalls", FinishReason::ToolCalls) => {}
+                    ("ContentFilter", FinishReason::ContentFilter) => {}
+                    _ => panic!("from_str({:?}) = {:?}, expected {}", s, fr, expected_name),
+                }
+            }
+
+            #[test]
+            fn from_str_unknown_returns_other(s in "[a-z_]{1,30}") {
+                // Filter out known strings
+                if ["stop", "end_turn", "length", "max_tokens", "tool_calls", "tool_use", "content_filter"].contains(&s.as_str()) {
+                    return Ok(());
+                }
+                let fr = FinishReason::from_str(&s);
+                match fr {
+                    FinishReason::Other(inner) => assert_eq!(inner, s),
+                    other => panic!("expected Other({:?}), got {:?}", s, other),
+                }
+            }
+        }
     }
 }
