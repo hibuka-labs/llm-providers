@@ -1,0 +1,30 @@
+[workspace]
+members = ["llm-trait"]
+
+[package]
+name = "llm-unified"
+version = "0.1.0"
+edition = "2024"
+description = "Unified LLM provider implementations for agent-base"
+
+[dependencies]
+llm-trait = { path = "llm-trait" }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+eventsource-stream = "0.2"
+futures-core = "0.3"
+futures-util = "0.3"
+reqwest = { version = "0.13", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.52", features = ["full"] }
+tracing = "0.1"
+rand = "0.9"
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1.52", features = ["full", "test-util"] }
+
+[[bin]]
+name = "llm-cli"
+path = "src/bin/llm-cli.rs"
