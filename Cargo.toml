@@ -1,11 +1,14 @@
 [workspace]
-members = ["llm-trait"]
+members = ["llm-trait", "fuzz"]
 
 [package]
 name = "llm-unified"
 version = "0.1.0"
 edition = "2024"
 description = "Unified LLM provider implementations for agent-base"
+
+[features]
+fuzzing = []
 
 [dependencies]
 llm-trait = { path = "llm-trait" }
@@ -24,6 +27,7 @@ rand = "0.9"
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { version = "1.52", features = ["full", "test-util"] }
+proptest = "1"
 
 [[bin]]
 name = "llm-cli"

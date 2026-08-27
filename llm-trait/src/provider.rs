@@ -43,7 +43,7 @@ pub trait LlmProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::LlmBackend;
+    use crate::backend::Protocol;
     use crate::message::ChatMessage;
     use crate::response::{FinishReason, StreamChunk};
     use crate::types::UsageInfo;
@@ -68,6 +68,8 @@ mod tests {
         ) -> Result<ChatResponse, LlmError> {
             Ok(ChatResponse {
                 content: "mock response".to_string(),
+                reasoning_content: None,
+                thinking_signature: None,
                 tool_calls: vec![],
                 usage: UsageInfo::default(),
                 finish_reason: FinishReason::Stop,
@@ -87,7 +89,6 @@ mod tests {
             ProviderInfo {
                 name: "mock".to_string(),
                 model: "mock-model".to_string(),
-                backend: LlmBackend::Custom("mock".to_string()),
                 version: None,
             }
         }

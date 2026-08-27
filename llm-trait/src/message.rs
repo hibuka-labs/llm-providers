@@ -60,10 +60,15 @@ pub enum ChatMessage {
     Assistant {
         content: Option<String>,
         reasoning_content: Option<String>,
+        /// Anthropic requires thinking blocks with signature to be sent back
+        /// in multi-turn conversations. This field stores the signature.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thinking_signature: Option<String>,
         tool_calls: Option<Vec<ToolCallMessage>>,
     },
     Tool {
         tool_call_id: String,
+        name: Option<String>,
         content: String,
     },
     /// Application-defined message type for extensibility.
@@ -130,6 +135,7 @@ impl ChatMessage {
         Self::Assistant {
             content: Some(content.into()),
             reasoning_content: None,
+            thinking_signature: None,
             tool_calls: None,
         }
     }
@@ -141,6 +147,7 @@ impl ChatMessage {
         Self::Assistant {
             content: Some(content.into()),
             reasoning_content: Some(reasoning.into()),
+            thinking_signature: None,
             tool_calls: None,
         }
     }
@@ -153,6 +160,7 @@ impl ChatMessage {
         Self::Assistant {
             content: None,
             reasoning_content: None,
+            thinking_signature: None,
             tool_calls: Some(vec![ToolCallMessage {
                 id: tool_call_id.into(),
                 name: tool_name.into(),
@@ -164,6 +172,19 @@ impl ChatMessage {
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self::Tool {
             tool_call_id: tool_call_id.into(),
+            name: None,
+            content: content.into(),
+        }
+    }
+
+    pub fn tool_with_name(
+        tool_call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self::Tool {
+            tool_call_id: tool_call_id.into(),
+            name: Some(name.into()),
             content: content.into(),
         }
     }
@@ -233,8 +254,22 @@ mod tests {
     fn chat_message_tool() {
         let msg = ChatMessage::tool("id1", "result");
         match &msg {
-            ChatMessage::Tool { tool_call_id, content } => {
+            ChatMessage::Tool { tool_call_id, name, content } => {
                 assert_eq!(tool_call_id, "id1");
+                assert!(name.is_none());
+                assert_eq!(content, "result");
+            }
+            _ => panic!("Expected Tool variant"),
+        }
+    }
+
+    #[test]
+    fn chat_message_tool_with_name() {
+        let msg = ChatMessage::tool_with_name("id1", "echo", "result");
+        match &msg {
+            ChatMessage::Tool { tool_call_id, name, content } => {
+                assert_eq!(tool_call_id, "id1");
+                assert_eq!(name.as_deref(), Some("echo"));
                 assert_eq!(content, "result");
             }
             _ => panic!("Expected Tool variant"),

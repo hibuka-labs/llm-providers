@@ -8,3 +8,6 @@ mod protocol;
 mod types;
 
 pub use protocol::AnthropicProtocol;
+
+#[cfg(feature = "fuzzing")]
+pub use protocol::fuzz_exports;

@@ -50,8 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Build config
+    let protocol = cli.protocol.as_deref().and_then(|s| s.parse().ok());
     let config = LlmConfig {
-        protocol: cli.protocol.clone(),
+        protocol,
         api_key: cli.api_key.clone(),
         model: cli.model.clone(),
         base_url: cli.base_url.clone(),
@@ -102,11 +103,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 StreamChunk::Thought(thinking) => {
                     eprintln!("[thinking] {}", thinking);
                 }
+                StreamChunk::ThinkingSignature(sig) => {
+                    eprintln!("[thinking signature] {}", &sig[..20.min(sig.len())]);
+                }
                 StreamChunk::ToolCall(call) => {
                     eprintln!("[tool call] {}", call);
                 }
                 StreamChunk::Usage(usage) => {
                     eprintln!("[usage] {:?}", usage);
+                }
+                StreamChunk::Error(msg) => {
+                    eprintln!("[stream error] {}", msg);
+                    break;
                 }
                 StreamChunk::Stop { finish_reason } => {
                     eprintln!();

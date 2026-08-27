@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::capabilities::{Capabilities, ProviderInfo};
 use super::error::LlmError;
+use super::http_client::HttpClient;
 use super::request::ChatRequest;
 use super::response::{ChatResponse, ChatStream};
 
@@ -42,6 +43,7 @@ pub enum HttpMethod {
 /// For example, Anthropic tool calls need to assemble arguments across
 /// multiple SSE events. Adapters can use StreamState to buffer intermediate state.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct StreamState {
     pub data: HashMap<String, Value>,
 }
@@ -54,6 +56,7 @@ pub struct StreamState {
 /// Implementors need:
 /// - [`build_request`](RawAdapter::build_request) - Build HTTP request
 /// - [`execute_stream`](RawAdapter::execute_stream) - Execute streaming request and parse SSE
+/// - [`parse_sse_stream`](RawAdapter::parse_sse_stream) - Parse SSE from pre-fetched response (optional)
 /// - [`parse_response`](RawAdapter::parse_response) - Parse non-streaming response (optional)
 /// - [`capabilities`](RawAdapter::capabilities) - Declare capabilities
 /// - [`info`](RawAdapter::info) - Provide info
@@ -71,20 +74,39 @@ pub trait RawAdapter: Send + Sync {
 
     /// Execute streaming request, fully parse SSE response.
     ///
-    /// The implementor receives `reqwest::Response` and parses the stream protocol,
+    /// The implementor receives `&dyn HttpClient` and parses the stream protocol,
     /// returning `ChatStream`. This gives the adapter full control,
     /// suitable for different providers' SSE format differences.
     ///
     /// Typical implementation:
-    /// 1. Check HTTP status code
-    /// 2. Parse SSE stream (according to provider's protocol format)
-    /// 3. Incremental tool call assembly (if needed)
-    /// 4. Return ChatStream
+    /// 1. Send request via `client.send(&request)`
+    /// 2. Check HTTP status code
+    /// 3. Parse SSE stream (according to provider's protocol format)
+    /// 4. Incremental tool call assembly (if needed)
+    /// 5. Return ChatStream
     async fn execute_stream(
         &self,
-        client: &reqwest::Client,
+        client: &dyn HttpClient,
         request: RawRequest,
     ) -> Result<ChatStream, LlmError>;
+
+    /// Parse SSE stream from an already-received HTTP response.
+    ///
+    /// This method is called by GenericProvider after a successful HTTP response
+    /// (with retry logic applied). The adapter only needs to parse the SSE stream,
+    /// not send the HTTP request.
+    ///
+    /// Default implementation: calls execute_stream (for backward compatibility).
+    async fn parse_sse_stream(
+        &self,
+        _client: &dyn HttpClient,
+        _request: RawRequest,
+        _response: super::http_client::HttpResponse,
+    ) -> Result<ChatStream, LlmError> {
+        // Default: delegate to execute_stream (which will re-send the request)
+        // Adapters should override this for proper retry support
+        Err(LlmError::llm("parse_sse_stream not implemented"))
+    }
 
     /// Parse non-streaming response.
     ///

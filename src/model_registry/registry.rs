@@ -231,6 +231,16 @@ impl ModelRegistry {
     }
 }
 
+// ── Fuzz exports ──
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_exports {
+    use super::ModelRegistry;
+
+    pub fn domain_matches(url: &str, domain: &str) -> bool {
+        ModelRegistry::domain_matches(url, domain)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

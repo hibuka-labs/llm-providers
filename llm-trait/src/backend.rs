@@ -1,61 +1,48 @@
-//! LLM provider backend and protocol type definitions.
+//! Protocol type definitions.
 
-/// LLM Provider backend type (internal use).
+use std::fmt;
+use std::str::FromStr;
+
+/// Wire protocol type.
 ///
-/// Used to identify different provider implementations.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LlmBackend {
-    /// OpenAI Chat Completions API
-    OpenAi,
-    /// OpenAI Responses API
-    OpenAiResponses,
-    /// Anthropic Claude API
-    Anthropic,
-    /// Custom backend
-    Custom(String),
-}
-
-impl LlmBackend {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "openai" => Self::OpenAi,
-            "openai-responses" | "responses" => Self::OpenAiResponses,
-            "anthropic" => Self::Anthropic,
-            other => Self::Custom(other.to_string()),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::OpenAiResponses => "openai-responses",
-            Self::Anthropic => "anthropic",
-            Self::Custom(s) => s,
-        }
-    }
-}
-
-/// Protocol type.
+/// Describes the API format used to communicate with the LLM provider.
+/// This is distinct from the provider name (e.g., "deepseek" uses OpenAi protocol).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
-    /// OpenAI compatible protocol (Chat Completions)
+    /// OpenAI Chat Completions API
     OpenAi,
-    /// OpenAI Responses API
+    /// OpenAI Responses API (future)
     OpenAiResponses,
-    /// Anthropic protocol
+    /// Anthropic Messages API
     Anthropic,
+}
+
+/// Error returned when parsing an invalid protocol string.
+#[derive(Debug, Clone)]
+pub struct ProtocolParseError(String);
+
+impl fmt::Display for ProtocolParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown protocol: '{}'", self.0)
+    }
+}
+
+impl std::error::Error for ProtocolParseError {}
+
+impl FromStr for Protocol {
+    type Err = ProtocolParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "openai" | "openai-chat" => Ok(Self::OpenAi),
+            "openai-responses" | "responses" => Ok(Self::OpenAiResponses),
+            "anthropic" | "claude" => Ok(Self::Anthropic),
+            _ => Err(ProtocolParseError(s.to_string())),
+        }
+    }
 }
 
 impl Protocol {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "openai" | "openai-chat" => Some(Self::OpenAi),
-            "openai-responses" | "responses" => Some(Self::OpenAiResponses),
-            "anthropic" | "claude" => Some(Self::Anthropic),
-            _ => None,
-        }
-    }
-
     pub fn as_str(&self) -> &str {
         match self {
             Self::OpenAi => "openai",
@@ -70,65 +57,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn backend_from_str_case_insensitive() {
-        assert_eq!(LlmBackend::from_str("openai"), LlmBackend::OpenAi);
-        assert_eq!(LlmBackend::from_str("OpenAI"), LlmBackend::OpenAi);
-        assert_eq!(LlmBackend::from_str("OPENAI"), LlmBackend::OpenAi);
-    }
-
-    #[test]
-    fn backend_from_str_anthropic() {
-        assert_eq!(LlmBackend::from_str("anthropic"), LlmBackend::Anthropic);
-        assert_eq!(LlmBackend::from_str("Anthropic"), LlmBackend::Anthropic);
-    }
-
-    #[test]
-    fn backend_from_str_responses() {
-        assert_eq!(
-            LlmBackend::from_str("openai-responses"),
-            LlmBackend::OpenAiResponses
-        );
-        assert_eq!(
-            LlmBackend::from_str("responses"),
-            LlmBackend::OpenAiResponses
-        );
-    }
-
-    #[test]
-    fn backend_from_str_custom() {
-        assert_eq!(
-            LlmBackend::from_str("ollama"),
-            LlmBackend::Custom("ollama".to_string())
-        );
-        assert_eq!(
-            LlmBackend::from_str("deepseek"),
-            LlmBackend::Custom("deepseek".to_string())
-        );
-    }
-
-    #[test]
-    fn backend_as_str_roundtrip() {
-        assert_eq!(LlmBackend::OpenAi.as_str(), "openai");
-        assert_eq!(LlmBackend::Anthropic.as_str(), "anthropic");
-        assert_eq!(LlmBackend::OpenAiResponses.as_str(), "openai-responses");
-        assert_eq!(LlmBackend::Custom("ollama".into()).as_str(), "ollama");
-    }
-
-    #[test]
     fn protocol_from_str() {
-        assert_eq!(Protocol::from_str("openai"), Some(Protocol::OpenAi));
-        assert_eq!(Protocol::from_str("openai-chat"), Some(Protocol::OpenAi));
-        assert_eq!(Protocol::from_str("anthropic"), Some(Protocol::Anthropic));
-        assert_eq!(Protocol::from_str("claude"), Some(Protocol::Anthropic));
+        assert_eq!("openai".parse::<Protocol>().unwrap(), Protocol::OpenAi);
+        assert_eq!("openai-chat".parse::<Protocol>().unwrap(), Protocol::OpenAi);
+        assert_eq!("anthropic".parse::<Protocol>().unwrap(), Protocol::Anthropic);
+        assert_eq!("claude".parse::<Protocol>().unwrap(), Protocol::Anthropic);
         assert_eq!(
-            Protocol::from_str("openai-responses"),
-            Some(Protocol::OpenAiResponses)
+            "openai-responses".parse::<Protocol>().unwrap(),
+            Protocol::OpenAiResponses
         );
         assert_eq!(
-            Protocol::from_str("responses"),
-            Some(Protocol::OpenAiResponses)
+            "responses".parse::<Protocol>().unwrap(),
+            Protocol::OpenAiResponses
         );
-        assert_eq!(Protocol::from_str("unknown"), None);
+        assert!("unknown".parse::<Protocol>().is_err());
     }
 
     #[test]
@@ -136,5 +78,14 @@ mod tests {
         assert_eq!(Protocol::OpenAi.as_str(), "openai");
         assert_eq!(Protocol::Anthropic.as_str(), "anthropic");
         assert_eq!(Protocol::OpenAiResponses.as_str(), "openai-responses");
+    }
+
+    #[test]
+    fn protocol_from_str_case_insensitive() {
+        assert_eq!("OpenAI".parse::<Protocol>().unwrap(), Protocol::OpenAi);
+        assert_eq!(
+            "ANTHROPIC".parse::<Protocol>().unwrap(),
+            Protocol::Anthropic
+        );
     }
 }

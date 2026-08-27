@@ -7,3 +7,6 @@
 mod protocol;
 
 pub use protocol::OpenAiProtocol;
+
+#[cfg(feature = "fuzzing")]
+pub use protocol::fuzz_exports;

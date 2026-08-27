@@ -1,7 +1,5 @@
 //! Provider capabilities and info types.
 
-use super::backend::LlmBackend;
-
 /// Provider capability description.
 #[derive(Clone, Debug, Default)]
 pub struct Capabilities {
@@ -22,12 +20,10 @@ pub struct Capabilities {
 /// Provider information.
 #[derive(Clone, Debug)]
 pub struct ProviderInfo {
-    /// Provider name (e.g. "openai", "anthropic")
+    /// Provider name (e.g. "openai", "anthropic", "mimo", "deepseek")
     pub name: String,
     /// Model name (e.g. "gpt-4o", "claude-sonnet")
     pub model: String,
-    /// Backend type
-    pub backend: LlmBackend,
     /// Version info (optional)
     pub version: Option<String>,
 }
@@ -71,7 +67,6 @@ mod tests {
         let info = ProviderInfo {
             name: "openai".to_string(),
             model: "gpt-4o".to_string(),
-            backend: LlmBackend::OpenAi,
             version: None,
         };
         let debug = format!("{:?}", info);

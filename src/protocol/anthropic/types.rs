@@ -52,6 +52,10 @@ pub enum ContentBlockDelta {
     InputJsonDelta {
         partial_json: String,
     },
+    /// Anthropic sends thinking signature as a separate delta
+    SignatureDelta {
+        signature: String,
+    },
     #[serde(other)]
     Other,
 }
@@ -113,6 +117,23 @@ pub enum MessagesStreamEvent {
         usage: MessageDeltaUsage,
     },
     MessageStop,
+    /// DeepSeek heartbeat event (no payload)
+    Ping,
+    /// Anthropic error event in stream
+    Error {
+        error: AnthropicError,
+    },
+    /// Catch-all for unknown event types (future provider extensions)
+    #[serde(other)]
+    Unknown,
+}
+
+/// Anthropic error object in stream events
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnthropicError {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub message: String,
 }
 
 #[cfg(test)]
@@ -165,10 +186,10 @@ mod tests {
     }
 
     #[test]
-    fn content_block_delta_signature_catches_as_other() {
+    fn content_block_delta_signature_parses_correctly() {
         let json = json!({"type": "signature_delta", "signature": "abc"});
         let delta: ContentBlockDelta = serde_json::from_value(json).unwrap();
-        assert_eq!(delta, ContentBlockDelta::Other);
+        assert_eq!(delta, ContentBlockDelta::SignatureDelta { signature: "abc".to_string() });
     }
 
     #[test]
@@ -269,5 +290,24 @@ mod tests {
         assert_eq!(resp.usage.input_tokens, 10);
         assert_eq!(resp._rest["id"], "msg_1");
         assert_eq!(resp._rest["model"], "claude");
+    }
+
+    #[test]
+    fn stream_event_error_parses_correctly() {
+        let json = json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": "Too many requests"
+            }
+        });
+        let event: MessagesStreamEvent = serde_json::from_value(json).unwrap();
+        match event {
+            MessagesStreamEvent::Error { error } => {
+                assert_eq!(error.error_type, "overloaded_error");
+                assert_eq!(error.message, "Too many requests");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 }

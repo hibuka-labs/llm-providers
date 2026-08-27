@@ -25,15 +25,19 @@
 //! # }
 //! ```
 
+pub mod model_registry;
 pub mod protocol;
-pub mod providers;
 pub mod generic;
 pub mod factory;
 
 pub use factory::{create_provider, create, from_env};
-pub use generic::GenericProvider;
-pub use providers::mimo::MimoProvider;
-pub use providers::deepseek::DeepSeekProvider;
-pub use providers::qwen::QwenProvider;
+pub use generic::{GenericProvider, ProfiledProvider};
 pub use protocol::anthropic::AnthropicProtocol;
 pub use protocol::openai::OpenAiProtocol;
+
+#[cfg(feature = "fuzzing")]
+pub mod fuzz {
+    pub use super::model_registry::registry::fuzz_exports as model_registry;
+    pub use super::protocol::openai::fuzz_exports as openai;
+    pub use super::protocol::anthropic::fuzz_exports as anthropic;
+}

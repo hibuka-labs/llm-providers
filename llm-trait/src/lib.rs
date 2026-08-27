@@ -32,6 +32,7 @@ pub mod backend;
 pub mod capabilities;
 pub mod config;
 pub mod error;
+pub mod http_client;
 pub mod message;
 pub mod provider;
 pub mod raw_adapter;
@@ -41,14 +42,15 @@ pub mod response;
 pub mod types;
 
 // Re-export key types at crate root for convenience.
-pub use backend::{LlmBackend, Protocol};
+pub use backend::Protocol;
 pub use capabilities::{Capabilities, ProviderInfo};
 pub use config::LlmConfig;
 pub use error::LlmError;
+pub use http_client::{HttpClient, HttpResponse, ReqwestHttpClient};
 pub use message::{ChatMessage, ImageAttachment, ImageDetail, ToolCallMessage};
 pub use provider::LlmProvider;
 pub use raw_adapter::{CallMode, HttpMethod, RawAdapter, RawRequest, StreamState};
-pub use reasoning::{ReasoningConfig, ReasoningEffort};
+pub use reasoning::{ReasoningConfig, ReasoningEffort, ReasoningMode, ReasoningSpec};
 pub use request::{ChatRequest, ResponseFormat};
 pub use response::{
     ChatResponse, ChatStream, FinishReason, StreamChunk, ToolCall,
