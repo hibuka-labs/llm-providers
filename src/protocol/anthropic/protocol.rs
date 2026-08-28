@@ -38,7 +38,7 @@ impl AnthropicProtocol {
             base_url: base_url
                 .unwrap_or("https://api.anthropic.com")
                 .to_string(),
-            max_tokens: 8192,
+            max_tokens: 16_384,  // default 16K
             profile: None,
         }
     }
@@ -52,13 +52,19 @@ impl AnthropicProtocol {
                     .and_then(|s| s.parse::<u32>().ok())
                     .or_else(|| v.as_u64().map(|n| n as u32))
             })
-            .unwrap_or(8192);
+            .unwrap_or(16_384);  // default 16K
 
         Self::new(&config.api_key, &config.model, Some(&config.base_url))
             .with_max_tokens(max_tokens)
     }
 
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    /// Set max output tokens (convenience method, overrides ModelProfile value)
+    pub fn with_max_output_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = max_tokens;
         self
     }
@@ -87,12 +93,20 @@ impl AnthropicProtocol {
             "building Anthropic request"
         );
 
-        // Use profile's max_output_tokens if available, otherwise use configured max_tokens
-        let effective_max_tokens = self
-            .profile
-            .as_ref()
-            .and_then(|p| p.capabilities.max_output_tokens)
-            .unwrap_or(self.max_tokens);
+        // Priority: user config > profile > default
+        // If user explicitly set max_tokens (non-default), user config wins
+        // Otherwise use profile value, fallback to default
+        let default_max_tokens = 16_384;
+        let effective_max_tokens = if self.max_tokens != default_max_tokens {
+            // User explicitly set max_tokens, user config wins
+            self.max_tokens
+        } else {
+            // User didn't set explicitly, use profile value or default
+            self.profile
+                .as_ref()
+                .and_then(|p| p.capabilities.max_output_tokens)
+                .unwrap_or(self.max_tokens)
+        };
 
         let mut body = serde_json::json!({
             "model": self.model,
