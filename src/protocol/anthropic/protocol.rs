@@ -393,8 +393,12 @@ impl AnthropicProtocol {
             },
             MessagesStreamEvent::ContentBlockStop { .. } => vec![],
             MessagesStreamEvent::MessageDelta { delta, usage } => {
+                // `usage.input_tokens` is optional per protocol but some
+                // compatible endpoints (DashScope) carry the full-context
+                // count here; the aggregator merges it over the
+                // message_start value.
                 let mut chunks = vec![StreamChunk::Usage(UsageInfo {
-                    prompt_tokens: None,
+                    prompt_tokens: usage.input_tokens,
                     completion_tokens: Some(usage.output_tokens),
                     total_tokens: None,
                     reasoning_tokens: None,
@@ -951,6 +955,53 @@ mod tests {
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("overloaded_error"), "Error should contain type");
         assert!(err_msg.contains("Too many requests"), "Error should contain message");
+    }
+
+    #[test]
+    fn convert_event_message_start_maps_input_tokens() {
+        // Real payload shape from DashScope's anthropic-compatible endpoint.
+        let event: MessagesStreamEvent = serde_json::from_str(
+            r#"{"message":{"model":"qwen3.8-flash","id":"msg_1","role":"assistant",
+                "type":"message","content":[],
+                "usage":{"input_tokens":2,"output_tokens":0}},"type":"message_start"}"#,
+        )
+        .unwrap();
+        let chunks = AnthropicProtocol::convert_event(event).unwrap();
+        let StreamChunk::Usage(u) = &chunks[0] else {
+            panic!("expected Usage chunk, got {chunks:?}");
+        };
+        assert_eq!(u.prompt_tokens, Some(2));
+        assert_eq!(u.completion_tokens, Some(0));
+    }
+
+    #[test]
+    fn convert_event_message_delta_maps_optional_input_tokens() {
+        // message_delta always carries the final output count; input_tokens is
+        // optional per protocol (real Anthropic omits it, DashScope includes
+        // the full-context count). Both shapes must survive the mapping.
+        let with_input: MessagesStreamEvent = serde_json::from_str(
+            r#"{"delta":{"stop_reason":"end_turn"},"type":"message_delta",
+                "usage":{"output_tokens":26,"input_tokens":63,
+                         "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}"#,
+        )
+        .unwrap();
+        let chunks = AnthropicProtocol::convert_event(with_input).unwrap();
+        let StreamChunk::Usage(u) = &chunks[0] else {
+            panic!("expected Usage chunk, got {chunks:?}");
+        };
+        assert_eq!(u.prompt_tokens, Some(63), "endpoint-reported input survives");
+        assert_eq!(u.completion_tokens, Some(26));
+
+        let without_input: MessagesStreamEvent = serde_json::from_str(
+            r#"{"delta":{"stop_reason":"end_turn"},"type":"message_delta",
+                "usage":{"output_tokens":26}}"#,
+        )
+        .unwrap();
+        let chunks = AnthropicProtocol::convert_event(without_input).unwrap();
+        let StreamChunk::Usage(u) = &chunks[0] else {
+            panic!("expected Usage chunk, got {chunks:?}");
+        };
+        assert_eq!(u.prompt_tokens, None, "absent input stays None for the merger");
     }
 
     #[test]
