@@ -491,6 +491,11 @@ impl OpenAiProtocol {
                     .get("total_tokens")
                     .and_then(|t| t.as_u64())
                     .map(|n| n as u32),
+                reasoning_tokens: u
+                    .get("completion_tokens_details")
+                    .and_then(|d| d.get("reasoning_tokens"))
+                    .and_then(|t| t.as_u64())
+                    .map(|n| n as u32),
             })
             .unwrap_or_default();
 
@@ -689,6 +694,11 @@ impl RawAdapter for OpenAiProtocol {
                                     .map(|n| n as u32),
                                 total_tokens: usage
                                     .get("total_tokens")
+                                    .and_then(|t| t.as_u64())
+                                    .map(|n| n as u32),
+                                reasoning_tokens: usage
+                                    .get("completion_tokens_details")
+                                    .and_then(|d| d.get("reasoning_tokens"))
                                     .and_then(|t| t.as_u64())
                                     .map(|n| n as u32),
                             }));

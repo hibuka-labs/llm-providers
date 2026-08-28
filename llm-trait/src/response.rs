@@ -181,6 +181,9 @@ impl ChatStream {
                     if u.total_tokens.is_some() {
                         usage.total_tokens = u.total_tokens;
                     }
+                    if u.reasoning_tokens.is_some() {
+                        usage.reasoning_tokens = u.reasoning_tokens;
+                    }
                 }
                 StreamChunk::Error(msg) => {
                     // Stream error from API - propagate as LlmError
@@ -448,6 +451,7 @@ mod tests {
                 prompt_tokens: Some(100),
                 completion_tokens: Some(50),
                 total_tokens: Some(150),
+                reasoning_tokens: None,
             })),
             Ok(StreamChunk::Stop {
                 finish_reason: Some("stop".into()),
@@ -492,12 +496,14 @@ mod tests {
                 prompt_tokens: Some(20),
                 completion_tokens: Some(0),
                 total_tokens: None,
+                reasoning_tokens: None,
             })),
             Ok(StreamChunk::Text("ok".into())),
             Ok(StreamChunk::Usage(UsageInfo {
                 prompt_tokens: None,
                 completion_tokens: Some(7),
                 total_tokens: None,
+                reasoning_tokens: None,
             })),
             Ok(StreamChunk::Stop {
                 finish_reason: Some("end_turn".into()),

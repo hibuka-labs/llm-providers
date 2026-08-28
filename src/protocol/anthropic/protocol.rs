@@ -141,7 +141,7 @@ impl AnthropicProtocol {
                         "type": "enabled",
                         "budget_tokens": budget
                     });
-                    if budget >= self.max_tokens {
+                    if budget >= effective_max_tokens {
                         tracing::warn!(
                             budget_tokens = budget,
                             original_max_tokens = self.max_tokens,
@@ -344,6 +344,7 @@ impl AnthropicProtocol {
                     prompt_tokens: Some(message.usage.input_tokens),
                     completion_tokens: Some(message.usage.output_tokens),
                     total_tokens: None,
+                    reasoning_tokens: None,
                 })]
             }
             MessagesStreamEvent::ContentBlockStart {
@@ -396,6 +397,7 @@ impl AnthropicProtocol {
                     prompt_tokens: None,
                     completion_tokens: Some(usage.output_tokens),
                     total_tokens: None,
+                    reasoning_tokens: None,
                 })];
 
                 if let Some(reason) = delta.stop_reason {
@@ -518,6 +520,7 @@ impl AnthropicProtocol {
                     .and_then(|t| t.as_u64())
                     .map(|n| n as u32),
                 total_tokens: None,
+                reasoning_tokens: None,
             })
             .unwrap_or_default();
 
@@ -1342,7 +1345,7 @@ mod tests {
             ..Default::default()
         };
         let proto = AnthropicProtocol::from_config(&config);
-        assert_eq!(proto.max_tokens, 8192);
+        assert_eq!(proto.max_tokens, 16384);
     }
 
     // ── build_request: system message ──
