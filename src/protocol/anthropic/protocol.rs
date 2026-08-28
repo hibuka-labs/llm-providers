@@ -660,7 +660,7 @@ impl RawAdapter for AnthropicProtocol {
                 supports_tools: true,
                 supports_vision: true,
                 supports_thinking: true,
-                max_context_tokens: Some(200_000),
+                max_context_tokens: Some(1_000_000),
                 max_output_tokens: Some(self.max_tokens),
             })
     }
@@ -715,8 +715,8 @@ mod tests {
                 supports_tools: true,
                 supports_vision: true,
                 supports_thinking: true,
-                max_context_tokens: Some(200_000),
-                max_output_tokens: Some(8_192),
+                max_context_tokens: Some(1_000_000),
+                max_output_tokens: Some(16_384),
                 ..Default::default()
             },
             reasoning_mode: ReasoningMode::Thinking,
