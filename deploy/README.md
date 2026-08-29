@@ -186,6 +186,30 @@ Keep `lib.sh` and `llm.sh` byte-identical across projects so a bug fixed in one
 is fixed in all; `config.sh` is where the projects differ. `diff` the two
 `config.sh` files to review a port in one screen.
 
+### Then add the generated dirs to .gitignore
+
+Append to the target repo's `.gitignore`:
+
+```gitignore
+deploy/logs/
+deploy/.state/
+```
+
+This is not cosmetic. A crate that declares no `include`/`exclude` list in
+`Cargo.toml` packages according to `.gitignore`, so `cargo package` will put
+`deploy/logs/*.log` — every run log, including local paths — inside the
+published tarball. That is unrecoverable once the version ships. Check the
+result before releasing:
+
+```bash
+cargo package --list --allow-dirty --no-verify | grep -E "logs|\.state"
+```
+
+Prints nothing when correct. `git add deploy` copies whatever logs happen to
+exist at that moment, so do this *before* the first commit, or run
+`git rm -r --cached deploy/logs` afterwards — `.gitignore` has no effect on
+files that are already tracked.
+
 ### The `INTERNAL_DEPS` list is the one that bites
 
 `cargo publish` refuses a path dependency with no version requirement:
