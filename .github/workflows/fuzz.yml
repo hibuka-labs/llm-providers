@@ -58,7 +58,7 @@ jobs:
       # dispatch input > weekly schedule > PR default
       TOTAL_SECONDS: ${{ github.event_name == 'schedule' && '900' || github.event.inputs.total_seconds || '60' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@nightly
 
