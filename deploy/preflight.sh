@@ -109,8 +109,8 @@ if [ "${#INTERNAL_DEPS[@]}" -gt 0 ]; then
       pass "$f: $dep has a version requirement"
     else
       bad "$f: $dep is a path dep with no 'version' — cargo publish will refuse"
-      printf '       %s\n' "$line"
-      printf '       ${C_YEL}fix:${C_RST} add version = "<published>" (preflight can do it with --fix)\n'
+      printf '       %s\n' "$line" | tee -a "$RUN_LOG"
+      note "$f: add version = \"<published>\" to the $dep dependency"
     fi
   done
 fi
