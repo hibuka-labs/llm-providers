@@ -1,0 +1,153 @@
+name: fuzz
+
+# Real fuzzing (not just a build check) of the untrusted-input paths: response
+# parsers and URL domain matching. libFuzzer is nightly-only, which is why this
+# is its own workflow rather than a job in ci.yml.
+#
+# ## Controlling CI time
+#
+# The whole cost is one number: `total_seconds`, split evenly across the three
+# targets. Everything else (checkout, install, the one-time sanitizer build) is
+# fixed overhead.
+#
+#   event               total fuzzing   timeout-minutes   gate
+#   -----------------   -------------   ---------------   --------------------
+#   pull_request        60s             25                advisory (non-blocking)
+#   schedule (weekly)   900s            60                blocking
+#   workflow_dispatch   your choice     60                blocking
+#
+# Locally libFuzzer sustains ~63k execs/s, so 60s ≈ 3.8M executions and
+# 900s ≈ 57M per target. If 25 minutes is too slow for PRs, lower
+# `total_seconds` — the build, not the fuzzing, is most of the floor.
+#
+# PR runs are `continue-on-error` on purpose: a nightly-toolchain or
+# runner-image hiccup should not block a merge. Scheduled runs are the hard gate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      total_seconds:
+        description: 'Total fuzzing budget across all targets (seconds)'
+        required: false
+        type: string
+        default: '120'
+  pull_request:
+    paths:
+      - 'llm-trait/src/**'
+      - 'src/**'
+      - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/fuzz.yml'
+  schedule:
+    # Sunday 03:00 UTC — long sweep, off-peak.
+    - cron: '0 3 * * 0'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  TARGETS: parse_openai_response_fuzz parse_anthropic_response_fuzz domain_matches_fuzz
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ github.event_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 25 || 60 }}
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    env:
+      # dispatch input > weekly schedule > PR default
+      TOTAL_SECONDS: ${{ github.event_name == 'schedule' && '900' || github.event.inputs.total_seconds || '60' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # cargo-fuzz is a workspace member, so its artifacts live in the
+          # workspace-root target/ dir (target/<triple>/release/), not fuzz/.
+          key: fuzz
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@cargo-fuzz
+
+      - name: Compute per-target budget
+        working-directory: fuzz
+        run: |
+          n=$(echo "$TARGETS" | wc -w | tr -d ' ')
+          # A typo in the dispatch field (or an empty value) must not turn into
+          # a runaway run or an arithmetic error, so validate then clamp.
+          # Plain `if` rather than `(( ... )) && ...`, which interacts badly with
+          # the `bash -e` that Actions uses when the test is false.
+          if ! [[ "$TOTAL_SECONDS" =~ ^[0-9]+$ ]]; then
+            echo "::warning::ignoring non-numeric total_seconds='$TOTAL_SECONDS', using 60"
+            TOTAL_SECONDS=60
+          fi
+          if (( TOTAL_SECONDS > 3600 )); then TOTAL_SECONDS=3600; fi
+          if (( TOTAL_SECONDS < 3 )); then TOTAL_SECONDS=3; fi
+          per=$(( TOTAL_SECONDS / n ))
+          echo "PER_TARGET_SECONDS=$per" >> "$GITHUB_ENV"
+          echo "fuzzing $n targets for ${per}s each ($((per * n))s of ${TOTAL_SECONDS}s budget)"
+
+      # Built once, then reused by every target — keeps total time predictable.
+      - name: Build fuzz targets
+        working-directory: fuzz
+        run: cargo fuzz build
+
+      - name: Fuzz
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for target in $TARGETS; do
+            if [ ! -d "seeds/$target" ]; then
+              echo "::warning file=fuzz/seeds::$target has no seed corpus; fuzzing from empty"
+            fi
+            # Copy the committed seeds into a scratch dir and fuzz *that*.
+            # `cargo fuzz run <target> <dir>` treats <dir> as a writable corpus:
+            # pointing it straight at fuzz/seeds/ makes libFuzzer append every
+            # discovered input there, silently turning a handful of curated
+            # seeds into thousands of generated files.
+            scratch="$RUNNER_TEMP/corpus/$target"
+            rm -rf "$scratch"
+            mkdir -p "$scratch"
+            cp "seeds/$target"/* "$scratch/" 2>/dev/null || true
+
+            echo "::group::$target (${PER_TARGET_SECONDS}s, $(ls -1 "$scratch" | wc -l) seeds)"
+            cargo fuzz run "$target" "$scratch" -- \
+              -max_total_time="$PER_TARGET_SECONDS" \
+              -print_final_stats=1
+            echo "::endgroup::"
+          done
+
+      # Guard: seeds are curated inputs, not fuzz output. If this ever lists
+      # files, a step handed libFuzzer a writable path inside the repo.
+      - name: Verify seed corpus is untouched
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          dirty=$(git status --porcelain --untracked-files=all -- seeds/ || true)
+          if [ -n "$dirty" ]; then
+            echo "::error file=fuzz/seeds::seeds/ was modified during the run — fuzzing wrote into the repo"
+            echo "$dirty"
+            exit 1
+          fi
+          echo "seeds/ clean: $(find seeds -type f | wc -l | tr -d ' ') files"
+
+      # Reached only when libFuzzer found a crash: reproducer files land in
+      # fuzz/artifacts/<target>/, plus a symbolised stack trace in the log.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: crash-artifacts-${{ github.run_number }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # To reproduce a crash locally:
+  #   cd fuzz && cargo +nightly fuzz run <target> artifacts/<target>/<file>
+  #
+  # If a leak report shows up from a dependency's process-lifetime globals
+  # (aws-lc / rustls are the usual suspects) rather than real growth, add
+  # ASAN_OPTIONS: detect_leaks=0 to the Fuzz step's env with a comment saying
+  # which crate caused it — do not disable it silently.
