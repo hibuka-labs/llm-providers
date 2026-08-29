@@ -260,8 +260,11 @@ manifest_set_dep_version() { # <toml> <dep> <new-version>
 # The sparse index is the authoritative machine view. The crates.io website is a
 # SPA that can 404 for minutes after a successful publish, and its API lags too;
 # never judge a publish by an HTML fetch.
-CRATES_API="https://crates.io/api/v1"
-SPARSE_INDEX="https://index.crates.io"
+# Overridable so the tool can target a private mirror, and so the failure paths
+# can be tested without waiting for a real outage. Assigning these unconditionally
+# silently discards any value set in the environment.
+CRATES_API="${DEPLOY_CRATES_API:-https://crates.io/api/v1}"
+SPARSE_INDEX="${DEPLOY_SPARSE_INDEX:-https://index.crates.io}"
 # crates.io rejects a bare `curl/8.x` default User-Agent with 403, so every
 # request must carry one. Override via DEPLOY_UA if you add contact info.
 UA="${DEPLOY_UA:-deploy-script/1.0}"
@@ -308,7 +311,17 @@ crate_json() { # <name> -> cached JSON body; non-zero if it could not be fetched
     age=$(( $(date +%s) - $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0) ))
     [ "$age" -gt "$CRATE_CACHE_TTL" ] && rm -f "$f"
   fi
-  [ -s "$f" ] || http "$CRATES_API/crates/$n" > "$f" 2>/dev/null
+  # Retry, like index_probe does. crates.io answers non-200 for ordinary
+  # reasons under load, and a single blip would otherwise make preflight report
+  # "unreachable" and block a release that is perfectly fine.
+  if [ ! -s "$f" ]; then
+    local try
+    for try in 1 2 3; do
+      http "$CRATES_API/crates/$n" > "$f" 2>/dev/null
+      [ -s "$f" ] && break
+      sleep $(( try * 2 ))
+    done
+  fi
   [ -s "$f" ] || return 1
   # Accept either shape: a hit has .crate, a 404 has .errors. Anything else is
   # an HTML block page or a truncated body, which must not be parsed as truth.

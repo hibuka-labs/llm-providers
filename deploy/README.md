@@ -159,6 +159,20 @@ seconds (default 300) because each crates.io call measures ~4.7s from here. The
 cache is cleared on `publish` and on exit. `./deploy/preflight.sh --clear-cache`
 forces a fresh look.
 
+Both registries are overridable, which also makes the failure paths testable
+without waiting for an outage:
+
+```bash
+DEPLOY_CRATES_API=https://crates.io/api/v1    # or a mirror
+DEPLOY_SPARSE_INDEX=https://index.crates.io
+DEPLOY_CACHE_TTL=300
+DEPLOY_UA="deploy-script/1.0 (+https://github.com/you/repo)"   # crates.io prefers contact info
+```
+
+Measured cost of a preflight: ~10s cold, ~7s warm. Pointing `DEPLOY_CRATES_API`
+at an unreachable host takes ~29s and blocks the release, which is the intended
+behaviour.
+
 ## Porting to another project
 
 Copy the whole `deploy/` directory, then rewrite **only `config.sh`**:
