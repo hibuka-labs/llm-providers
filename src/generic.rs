@@ -8,12 +8,13 @@
 //! `ProfiledProvider` wraps `GenericProvider` with a `ModelProfile`,
 //! overriding `capabilities()` and `info()` from the profile.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 
 use llm_trait::{
-    Capabilities, CallMode, ChatRequest, ChatResponse, ChatStream, HttpClient, LlmError,
+    CallMode, Capabilities, ChatRequest, ChatResponse, ChatStream, HttpClient, LlmError,
     LlmProvider, ProviderInfo, RawAdapter, RawRequest, ReqwestHttpClient,
 };
 
@@ -48,7 +49,7 @@ impl Default for ProviderConfig {
 /// implements `LlmProvider`.
 pub struct GenericProvider {
     adapter: Box<dyn RawAdapter>,
-    client: Box<dyn HttpClient>,
+    client: Arc<dyn HttpClient>,
     config: ProviderConfig,
 }
 
@@ -68,7 +69,24 @@ impl GenericProvider {
 
         Self {
             adapter,
-            client: Box::new(ReqwestHttpClient::new(reqwest_client)),
+            client: Arc::new(ReqwestHttpClient::new(reqwest_client)),
+            config,
+        }
+    }
+
+    /// Build a provider on top of a caller-supplied [`HttpClient`].
+    ///
+    /// Use this to stub transport in tests, share a connection pool wrapper,
+    /// or route requests through custom middleware (logging, proxies, signing).
+    /// The `config` still controls retry/backoff behaviour.
+    pub fn with_http_client(
+        adapter: Box<dyn RawAdapter>,
+        client: Arc<dyn HttpClient>,
+        config: ProviderConfig,
+    ) -> Self {
+        Self {
+            adapter,
+            client,
             config,
         }
     }
@@ -102,7 +120,10 @@ impl GenericProvider {
                 Ok(response) => {
                     if response.is_success() {
                         // Success - delegate to adapter for SSE parsing
-                        return self.adapter.parse_sse_stream(self.client.as_ref(), request, response).await;
+                        return self
+                            .adapter
+                            .parse_sse_stream(self.client.as_ref(), request, response)
+                            .await;
                     }
 
                     let status = response.status();
@@ -137,7 +158,10 @@ impl GenericProvider {
     }
 
     /// Send HTTP request with retry logic.
-    async fn send_request(&self, request: &RawRequest) -> Result<llm_trait::HttpResponse, LlmError> {
+    async fn send_request(
+        &self,
+        request: &RawRequest,
+    ) -> Result<llm_trait::HttpResponse, LlmError> {
         let mut last_err = None;
 
         for attempt in 0..=self.config.max_retries {
@@ -267,21 +291,37 @@ impl LlmProvider for ProfiledProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_trait::{
-        ChatMessage, FinishReason, HttpMethod, StreamChunk, UsageInfo,
-    };
+    use llm_trait::{ChatMessage, FinishReason, HttpMethod, StreamChunk, UsageInfo};
+    use std::sync::Arc;
 
-    /// Mock HTTP client for testing
-    struct MockHttpClient;
+    /// Mock HTTP client that serves scripted responses, for transport-level tests.
+    struct MockHttpClient {
+        responses: std::sync::Mutex<Vec<Result<llm_trait::HttpResponse, LlmError>>>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl MockHttpClient {
+        fn new(responses: Vec<llm_trait::HttpResponse>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses.into_iter().map(Ok).collect()),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
 
     #[async_trait]
     impl HttpClient for MockHttpClient {
         async fn send(&self, _request: &RawRequest) -> Result<llm_trait::HttpResponse, LlmError> {
-            // Return a mock successful response
-            // Note: This requires creating a mock HttpResponse, which is tricky
-            // because HttpResponse wraps reqwest::Response
-            // For now, we'll test the retry logic with a different approach
-            Err(LlmError::llm("Mock HTTP client - use wiremock for real tests"))
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut queue = self.responses.lock().unwrap();
+            if queue.is_empty() {
+                return Err(LlmError::llm("MockHttpClient: no responses left"));
+            }
+            queue.remove(0)
         }
     }
 
@@ -315,7 +355,9 @@ mod tests {
                     finish_reason: Some("stop".into()),
                 }),
             ];
-            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(chunks))))
+            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(
+                chunks,
+            ))))
         }
 
         async fn parse_sse_stream(
@@ -330,7 +372,9 @@ mod tests {
                     finish_reason: Some("stop".into()),
                 }),
             ];
-            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(chunks))))
+            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(
+                chunks,
+            ))))
         }
 
         fn parse_response(&self, _body: &[u8]) -> Result<ChatResponse, LlmError> {
@@ -382,6 +426,73 @@ mod tests {
         assert!(caps.supports_tools);
     }
 
+    #[tokio::test]
+    async fn chat_uses_injected_http_client() {
+        // `with_http_client` must route transport through the caller's client,
+        // which is how adapters get unit-tested without a network.
+        let client = Arc::new(MockHttpClient::new(vec![
+            llm_trait::HttpResponse::from_text(200, "{}".to_string()),
+        ]));
+        let provider = GenericProvider::with_http_client(
+            Box::new(MockAdapter),
+            client.clone(),
+            ProviderConfig::default(),
+        );
+
+        let response = provider
+            .chat(ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .unwrap();
+
+        assert_eq!(response.content, "mock response");
+        assert_eq!(client.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn retries_5xx_then_succeeds() {
+        let client = Arc::new(MockHttpClient::new(vec![
+            llm_trait::HttpResponse::from_text(503, "overloaded".to_string()),
+            llm_trait::HttpResponse::from_text(200, "{}".to_string()),
+        ]));
+        let config = ProviderConfig {
+            retry_delay: Duration::ZERO,
+            max_retries: 2,
+            ..Default::default()
+        };
+        let provider =
+            GenericProvider::with_http_client(Box::new(MockAdapter), client.clone(), config);
+
+        let response = provider
+            .chat(ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .unwrap();
+
+        assert_eq!(response.content, "mock response");
+        assert_eq!(client.calls(), 2, "503 should be retried once");
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_4xx() {
+        let client = Arc::new(MockHttpClient::new(vec![
+            llm_trait::HttpResponse::from_text(401, "bad key".to_string()),
+        ]));
+        let config = ProviderConfig {
+            retry_delay: Duration::ZERO,
+            max_retries: 3,
+            ..Default::default()
+        };
+        let provider =
+            GenericProvider::with_http_client(Box::new(MockAdapter), client.clone(), config);
+
+        let err = provider
+            .chat(ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), Some(401));
+        assert_eq!(client.calls(), 1, "401 must not be retried");
+    }
+
     // Note: generic_provider_stream test removed because execute_stream now does
     // HTTP request with retry, requiring a real HTTP server or mock HTTP client.
     // Use wiremock tests for stream testing.
@@ -395,10 +506,7 @@ mod tests {
             reasoning_mode: llm_trait::ReasoningMode::Effort,
             supported_extra_params: &[],
         };
-        let provider = ProfiledProvider::new(
-            GenericProvider::new(Box::new(MockAdapter)),
-            profile,
-        );
+        let provider = ProfiledProvider::new(GenericProvider::new(Box::new(MockAdapter)), profile);
         let info = provider.info();
         assert_eq!(info.name, "deepseek");
         assert_eq!(info.model, "mock-model");
@@ -427,10 +535,7 @@ mod tests {
             reasoning_mode: llm_trait::ReasoningMode::Effort,
             supported_extra_params: &[],
         };
-        let provider = ProfiledProvider::new(
-            GenericProvider::new(Box::new(MockAdapter)),
-            profile,
-        );
+        let provider = ProfiledProvider::new(GenericProvider::new(Box::new(MockAdapter)), profile);
         let got = provider.capabilities();
         assert!(got.supports_streaming);
         assert!(!got.supports_tools);
@@ -449,7 +554,9 @@ mod tests {
     fn calculate_backoff_increases_with_attempt() {
         let provider = GenericProvider::new(Box::new(MockAdapter));
         // Run multiple times to average out jitter
-        let mut delays: Vec<u64> = (1..=5).map(|a| provider.calculate_backoff(a).as_millis() as u64).collect();
+        let mut delays: Vec<u64> = (1..=5)
+            .map(|a| provider.calculate_backoff(a).as_millis() as u64)
+            .collect();
         delays.sort();
         // First attempt should be smallest
         let d1 = provider.calculate_backoff(1).as_millis() as u64;
@@ -467,10 +574,7 @@ mod tests {
             reasoning_mode: llm_trait::ReasoningMode::Effort,
             supported_extra_params: &[],
         };
-        let provider = ProfiledProvider::new(
-            GenericProvider::new(Box::new(MockAdapter)),
-            profile,
-        );
+        let provider = ProfiledProvider::new(GenericProvider::new(Box::new(MockAdapter)), profile);
         let req = ChatRequest::new(vec![ChatMessage::user("hi")]);
         // ProfiledProvider::stream delegates to inner GenericProvider::stream
         // which will fail because MockAdapter's execute_stream does HTTP,
