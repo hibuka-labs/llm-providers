@@ -1,14 +1,14 @@
 //! LLM layer unified error type.
 //!
-//! Defined in `llm-trait` so that `agent-base` can convert it to `AgentError`
-//! via `From<LlmError>`. This keeps `llm-trait` lightweight — it does not
-//! depend on `agent-base`.
+//! Defined in `llm-trait` so downstream runtimes can convert it into their own
+//! error type via `From<LlmError>`. This keeps `llm-trait` lightweight — it does
+//! not depend on any consumer crate.
 
 /// LLM layer unified error type.
 ///
 /// Covers configuration errors, API errors, general LLM errors,
-/// and stream parsing errors. Designed to be converted into
-/// `AgentError` by the runtime layer.
+/// and stream parsing errors. Designed to be converted into a
+/// consumer's own error type by the runtime layer.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum LlmError {
     /// Configuration error (missing API key, invalid model name, etc.)
@@ -47,6 +47,16 @@ impl LlmError {
             message: message.into(),
         }
     }
+
+    /// HTTP status code, if this error came from an API response.
+    ///
+    /// Useful for deciding whether to retry or how to surface the failure.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::LlmApi { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
 }
 
 // Convenience From impls for common error types.
@@ -71,6 +81,14 @@ mod tests {
     fn display_api() {
         let err = LlmError::api(401, "unauthorized");
         assert_eq!(err.to_string(), "API error 401: unauthorized");
+        assert_eq!(err.status(), Some(401));
+    }
+
+    #[test]
+    fn status_is_none_for_non_api_errors() {
+        assert_eq!(LlmError::config("missing key").status(), None);
+        assert_eq!(LlmError::llm("timeout").status(), None);
+        assert_eq!(LlmError::stream("bad SSE").status(), None);
     }
 
     #[test]

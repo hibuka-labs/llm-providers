@@ -77,13 +77,11 @@ impl ReasoningConfig {
                 }
             }
             ReasoningMode::Both => {
-                // P2-13: Prefer Thinking over Effort.
+                // Prefer Thinking over Effort.
                 // Thinking is more expressive; Anthropic only handles Thinking.
                 // If budget_tokens is provided, use Thinking; otherwise fall back to Effort.
-                if self.budget_tokens.is_some() {
-                    ReasoningSpec::Thinking {
-                        budget_tokens: self.budget_tokens.unwrap(),
-                    }
+                if let Some(budget_tokens) = self.budget_tokens {
+                    ReasoningSpec::Thinking { budget_tokens }
                 } else if let Some(effort) = &self.effort {
                     if !matches!(effort, ReasoningEffort::None) {
                         return ReasoningSpec::Effort(effort.clone());
@@ -112,7 +110,10 @@ mod tests {
             budget_tokens: Some(4096),
             ..Default::default()
         };
-        assert!(matches!(config.to_spec(ReasoningMode::None), ReasoningSpec::None));
+        assert!(matches!(
+            config.to_spec(ReasoningMode::None),
+            ReasoningSpec::None
+        ));
     }
 
     #[test]
@@ -134,7 +135,10 @@ mod tests {
             budget_tokens: Some(4096),
             ..Default::default()
         };
-        assert!(matches!(config.to_spec(ReasoningMode::Effort), ReasoningSpec::None));
+        assert!(matches!(
+            config.to_spec(ReasoningMode::Effort),
+            ReasoningSpec::None
+        ));
     }
 
     #[test]
@@ -145,7 +149,9 @@ mod tests {
         };
         assert!(matches!(
             config.to_spec(ReasoningMode::Thinking),
-            ReasoningSpec::Thinking { budget_tokens: 4096 }
+            ReasoningSpec::Thinking {
+                budget_tokens: 4096
+            }
         ));
     }
 
@@ -154,7 +160,9 @@ mod tests {
         let config = ReasoningConfig::default();
         assert!(matches!(
             config.to_spec(ReasoningMode::Thinking),
-            ReasoningSpec::Thinking { budget_tokens: 2048 }
+            ReasoningSpec::Thinking {
+                budget_tokens: 2048
+            }
         ));
     }
 
@@ -165,12 +173,14 @@ mod tests {
             budget_tokens: Some(4096),
             ..Default::default()
         };
-        // P2-13: Both mode should prefer Thinking over Effort,
+        // Both mode should prefer Thinking over Effort,
         // because Thinking is more expressive and Effort can be derived from it.
         // Anthropic only handles Thinking, so preferring Effort would silently drop reasoning.
         assert!(matches!(
             config.to_spec(ReasoningMode::Both),
-            ReasoningSpec::Thinking { budget_tokens: 4096 }
+            ReasoningSpec::Thinking {
+                budget_tokens: 4096
+            }
         ));
     }
 
@@ -183,7 +193,9 @@ mod tests {
         };
         assert!(matches!(
             config.to_spec(ReasoningMode::Both),
-            ReasoningSpec::Thinking { budget_tokens: 4096 }
+            ReasoningSpec::Thinking {
+                budget_tokens: 4096
+            }
         ));
     }
 
@@ -197,13 +209,15 @@ mod tests {
         // Effort::None should be treated as "no effort", fallback to thinking
         assert!(matches!(
             config.to_spec(ReasoningMode::Both),
-            ReasoningSpec::Thinking { budget_tokens: 4096 }
+            ReasoningSpec::Thinking {
+                budget_tokens: 4096
+            }
         ));
     }
 
     #[test]
     fn to_spec_enabled_false_disables_reasoning() {
-        // P1-9 FIXED: ReasoningConfig.enabled=false now disables reasoning.
+        // ReasoningConfig.enabled=false now disables reasoning.
         let config = ReasoningConfig {
             enabled: Some(false),
             effort: Some(ReasoningEffort::High),
@@ -212,7 +226,7 @@ mod tests {
         let spec = config.to_spec(ReasoningMode::Effort);
         assert!(
             matches!(spec, ReasoningSpec::None),
-            "P1-9 FIXED: enabled=false should disable reasoning"
+            "enabled=false should disable reasoning"
         );
 
         let config2 = ReasoningConfig {
@@ -223,7 +237,7 @@ mod tests {
         let spec2 = config2.to_spec(ReasoningMode::Thinking);
         assert!(
             matches!(spec2, ReasoningSpec::None),
-            "P1-9 FIXED: enabled=false should disable thinking"
+            "enabled=false should disable thinking"
         );
     }
 

@@ -57,6 +57,12 @@ pub enum FinishReason {
 }
 
 impl FinishReason {
+    /// Map a provider-supplied finish reason string to the canonical enum.
+    ///
+    /// Kept as an inherent method for back-compat; `std::str::FromStr` is also
+    /// implemented, so `"length".parse::<FinishReason>()` works and returns `Ok`
+    /// for any input.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "stop" | "end_turn" => Self::Stop,
@@ -78,6 +84,16 @@ impl FinishReason {
     }
 }
 
+/// Every string maps somewhere (unknown values become [`FinishReason::Other`]),
+/// so parsing is infallible.
+impl std::str::FromStr for FinishReason {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(FinishReason::from_str(s))
+    }
+}
+
 /// Streaming response chunk.
 #[derive(Clone, Debug)]
 pub enum StreamChunk {
@@ -94,9 +110,7 @@ pub enum StreamChunk {
     /// Stream error (from API error events)
     Error(String),
     /// Stream end
-    Stop {
-        finish_reason: Option<String>,
-    },
+    Stop { finish_reason: Option<String> },
 }
 
 /// Streaming response wrapper.
@@ -108,18 +122,14 @@ pub struct ChatStream {
 
 impl ChatStream {
     /// Create a new ChatStream.
-    pub fn new(
-        stream: Pin<Box<dyn Stream<Item = Result<StreamChunk, LlmError>> + Send>>,
-    ) -> Self {
+    pub fn new(stream: Pin<Box<dyn Stream<Item = Result<StreamChunk, LlmError>> + Send>>) -> Self {
         Self { inner: stream }
     }
 
     /// Consume self and return the inner stream.
     ///
     /// Useful for adapters that need to wrap the stream in a different type.
-    pub fn into_inner(
-        self,
-    ) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, LlmError>> + Send>> {
+    pub fn into_inner(self) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, LlmError>> + Send>> {
         self.inner
     }
 
@@ -256,10 +266,10 @@ fn apply_tool_call_delta(buf: &mut BTreeMap<usize, ToolCall>, value: &Value) {
         }
 
         // Argument fragment for an existing tool call
-        if let Some(args_fragment) = arguments {
-            if let Some(tc) = buf.get_mut(&index) {
-                tc.arguments.push_str(args_fragment);
-            }
+        if let Some(args_fragment) = arguments
+            && let Some(tc) = buf.get_mut(&index)
+        {
+            tc.arguments.push_str(args_fragment);
         }
     }
 
@@ -342,7 +352,10 @@ mod tests {
         assert_eq!(FinishReason::from_str("end_turn"), FinishReason::Stop);
         assert_eq!(FinishReason::from_str("length"), FinishReason::Length);
         assert_eq!(FinishReason::from_str("max_tokens"), FinishReason::Length);
-        assert_eq!(FinishReason::from_str("tool_calls"), FinishReason::ToolCalls);
+        assert_eq!(
+            FinishReason::from_str("tool_calls"),
+            FinishReason::ToolCalls
+        );
         assert_eq!(FinishReason::from_str("tool_use"), FinishReason::ToolCalls);
         assert_eq!(
             FinishReason::from_str("content_filter"),
@@ -360,6 +373,47 @@ mod tests {
         assert_eq!(FinishReason::Length.as_str(), "length");
         assert_eq!(FinishReason::ToolCalls.as_str(), "tool_calls");
         assert_eq!(FinishReason::ContentFilter.as_str(), "content_filter");
+        // Unknown reasons round-trip verbatim through Other.
+        assert_eq!(
+            FinishReason::Other("refusal".to_string()).as_str(),
+            "refusal"
+        );
+    }
+
+    #[test]
+    fn parse_finish_reason_matches_inherent_from_str() {
+        for s in ["stop", "length", "tool_calls", "content_filter", "weird"] {
+            assert_eq!(parse_finish_reason(s), FinishReason::from_str(s));
+        }
+    }
+
+    #[test]
+    fn from_str_trait_parses_infinitely() {
+        // `"…".parse::<FinishReason>()` must work and never fail: unknown values
+        // become Other rather than an error.
+        let known: FinishReason = "max_tokens".parse().unwrap();
+        assert_eq!(known, FinishReason::Length);
+        let unknown: FinishReason = "totally-new-reason".parse().unwrap();
+        assert_eq!(
+            unknown,
+            FinishReason::Other("totally-new-reason".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn into_inner_yields_the_underlying_stream() {
+        use futures_util::StreamExt;
+        let chunks = vec![
+            Ok(StreamChunk::Text("a".into())),
+            Ok(StreamChunk::Stop {
+                finish_reason: Some("stop".into()),
+            }),
+        ];
+        let stream = ChatStream::new(Box::pin(futures_util::stream::iter(chunks)));
+
+        let collected: Vec<_> = stream.into_inner().collect().await;
+        assert_eq!(collected.len(), 2);
+        assert!(matches!(collected[0], Ok(StreamChunk::Text(ref t)) if t == "a"));
     }
 
     // ── ChatStream::collect_text ──
@@ -535,9 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn collect_response_no_stop_chunk() {
-        let chunks: Vec<Result<StreamChunk, LlmError>> = vec![
-            Ok(StreamChunk::Text("text".into())),
-        ];
+        let chunks: Vec<Result<StreamChunk, LlmError>> = vec![Ok(StreamChunk::Text("text".into()))];
         let stream = ChatStream::new(Box::pin(futures_util::stream::iter(chunks)));
         let response = stream.collect_response().await.unwrap();
 

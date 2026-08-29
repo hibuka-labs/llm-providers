@@ -60,7 +60,10 @@ mod tests {
     fn protocol_from_str() {
         assert_eq!("openai".parse::<Protocol>().unwrap(), Protocol::OpenAi);
         assert_eq!("openai-chat".parse::<Protocol>().unwrap(), Protocol::OpenAi);
-        assert_eq!("anthropic".parse::<Protocol>().unwrap(), Protocol::Anthropic);
+        assert_eq!(
+            "anthropic".parse::<Protocol>().unwrap(),
+            Protocol::Anthropic
+        );
         assert_eq!("claude".parse::<Protocol>().unwrap(), Protocol::Anthropic);
         assert_eq!(
             "openai-responses".parse::<Protocol>().unwrap(),
@@ -78,6 +81,15 @@ mod tests {
         assert_eq!(Protocol::OpenAi.as_str(), "openai");
         assert_eq!(Protocol::Anthropic.as_str(), "anthropic");
         assert_eq!(Protocol::OpenAiResponses.as_str(), "openai-responses");
+    }
+
+    #[test]
+    fn protocol_parse_error_display_names_input() {
+        let err = "grpc".parse::<Protocol>().unwrap_err();
+        assert_eq!(err.to_string(), "unknown protocol: 'grpc'");
+        // Usable as a std error and still Debug-printable.
+        let dyn_err: &dyn std::error::Error = &err;
+        assert!(dyn_err.to_string().contains("grpc"));
     }
 
     #[test]

@@ -134,10 +134,122 @@ impl HttpClient for ReqwestHttpClient {
 
         // Convert reqwest byte stream to our type-erased stream
         let reqwest_stream = response.bytes_stream();
-        let byte_stream = Box::pin(reqwest_stream.map(|r| {
-            r.map_err(|e| LlmError::stream(format!("Stream read error: {e}")))
-        }));
+        let byte_stream = Box::pin(
+            reqwest_stream
+                .map(|r| r.map_err(|e| LlmError::stream(format!("Stream read error: {e}")))),
+        );
 
         Ok(HttpResponse::new(status, byte_stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use futures_util::StreamExt;
+
+    fn stream_of(chunks: Vec<Result<Bytes, LlmError>>) -> ByteStream {
+        Box::pin(futures_util::stream::iter(chunks))
+    }
+
+    #[test]
+    fn is_success_covers_only_2xx() {
+        for status in [200u16, 201, 204, 299] {
+            let response = HttpResponse::from_text(status, String::new());
+            assert_eq!(response.status(), status);
+            assert!(response.is_success(), "{status} should be a success");
+        }
+        for status in [100u16, 199, 300, 400, 401, 429, 500, 503] {
+            let response = HttpResponse::from_text(status, String::new());
+            assert!(!response.is_success(), "{status} should not be a success");
+        }
+    }
+
+    #[tokio::test]
+    async fn from_text_body_is_returned_verbatim() {
+        let body = "{\"error\":\"bad request\"}";
+        let response = HttpResponse::from_text(400, body.to_string());
+        assert_eq!(response.text().await, body);
+    }
+
+    #[tokio::test]
+    async fn text_concatenates_stream_chunks() {
+        let response = HttpResponse::new(
+            200,
+            stream_of(vec![
+                Ok(Bytes::from_static(b"data: ")),
+                Ok(Bytes::from_static(b"[DONE]")),
+            ]),
+        );
+        assert_eq!(response.text().await, "data: [DONE]");
+    }
+
+    #[tokio::test]
+    async fn text_of_an_empty_body_is_an_empty_string() {
+        assert_eq!(HttpResponse::from_text(204, String::new()).text().await, "");
+    }
+
+    #[tokio::test]
+    async fn bytes_stream_of_a_text_response_is_empty() {
+        // `from_text` carries no stream, so `bytes_stream` falls back to empty
+        // rather than panicking — error bodies still reach adapters.
+        assert_eq!(
+            HttpResponse::from_text(204, String::new())
+                .bytes_stream()
+                .count()
+                .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_read_error_yields_partial_body_without_panicking() {
+        // A mid-stream transport failure returns what arrived so far; adapters
+        // turn that into a Stream error, they never see a panic.
+        let response = HttpResponse::new(
+            200,
+            stream_of(vec![
+                Ok(Bytes::from_static(b"head")),
+                Err(LlmError::stream("connection reset")),
+                Ok(Bytes::from_static(b"never-read")),
+            ]),
+        );
+        assert_eq!(response.text().await, "head");
+    }
+
+    #[tokio::test]
+    async fn invalid_utf8_is_decoded_lossily() {
+        // 0xf0 starts a 4-byte sequence but 0x28 is not a continuation byte.
+        let response = HttpResponse::new(
+            200,
+            stream_of(vec![Ok(Bytes::from_static(&[0xf0, 0x28, 0x8c]))]),
+        );
+        let text = response.text().await;
+        assert!(
+            text.contains('\u{fffd}'),
+            "expected replacement char: {text:?}"
+        );
+        assert!(text.contains('('), "valid byte should survive: {text:?}");
+    }
+
+    #[tokio::test]
+    async fn bytes_stream_preserves_chunk_boundaries() {
+        // Unlike `text()`, `bytes_stream()` keeps frames separate — SSE parsers
+        // depend on not having chunk boundaries merged away.
+        let response = HttpResponse::new(
+            200,
+            stream_of(vec![
+                Ok(Bytes::from_static(b"a")),
+                Ok(Bytes::from_static(b"b")),
+                Ok(Bytes::from_static(b"c")),
+            ]),
+        );
+        let sizes: Vec<usize> = response
+            .bytes_stream()
+            .map(|c| c.unwrap().len())
+            .collect()
+            .await;
+        assert_eq!(sizes, vec![1, 1, 1]);
     }
 }

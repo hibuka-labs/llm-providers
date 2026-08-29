@@ -78,6 +78,43 @@ impl ChatRequest {
 }
 
 #[cfg(test)]
+mod response_format_tests {
+    use super::*;
+
+    #[test]
+    fn json_object_to_api_value() {
+        assert_eq!(
+            ResponseFormat::JsonObject.to_api_value(),
+            serde_json::json!({ "type": "json_object" })
+        );
+    }
+
+    #[test]
+    fn json_schema_to_api_value() {
+        let schema = serde_json::json!({"type": "object"});
+        let value = ResponseFormat::JsonSchema {
+            name: "answer".to_string(),
+            schema: schema.clone(),
+        }
+        .to_api_value();
+
+        assert_eq!(value["type"], "json_schema");
+        assert_eq!(value["json_schema"]["name"], "answer");
+        assert_eq!(value["json_schema"]["schema"], schema);
+    }
+
+    #[test]
+    fn with_response_format_stores_the_format() {
+        let req = ChatRequest::new(vec![ChatMessage::user("hi")])
+            .with_response_format(ResponseFormat::JsonObject);
+        assert!(matches!(
+            req.response_format,
+            Some(ResponseFormat::JsonObject)
+        ));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

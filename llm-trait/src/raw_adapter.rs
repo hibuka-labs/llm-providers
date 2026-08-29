@@ -20,13 +20,137 @@ pub enum CallMode {
 }
 
 /// Raw HTTP request.
-#[derive(Debug, Clone)]
+///
+/// `headers` normally carry the API key, so the `Debug` impl redacts values for
+/// authentication-related header names.
+#[derive(Clone)]
 pub struct RawRequest {
     pub url: String,
     pub method: HttpMethod,
     pub headers: HashMap<String, String>,
     pub body: Value,
     pub stream: bool,
+}
+
+/// Whether a header name looks like it carries a credential.
+fn is_sensitive_header(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("authorization")
+        || name.contains("api-key")
+        || name.contains("apikey")
+        || name.contains("x-api-key")
+        || name.contains("token")
+}
+
+impl std::fmt::Debug for RawRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: HashMap<&str, &str> = self
+            .headers
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str(),
+                    if is_sensitive_header(k) {
+                        "***"
+                    } else {
+                        v.as_str()
+                    },
+                )
+            })
+            .collect();
+        f.debug_struct("RawRequest")
+            .field("url", &self.url)
+            .field("method", &self.method)
+            .field("headers", &headers)
+            .field("body", &self.body)
+            .field("stream", &self.stream)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    fn request_with(headers: &[(&str, &str)]) -> RawRequest {
+        RawRequest {
+            url: "https://api.example.com/v1/messages".to_string(),
+            method: HttpMethod::Post,
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            body: serde_json::json!({"model": "m"}),
+            stream: true,
+        }
+    }
+
+    #[test]
+    fn credential_headers_are_redacted() {
+        let secret = "sk-super-secret-value";
+        for name in [
+            "authorization",
+            "Authorization",
+            "x-api-key",
+            "X-API-KEY",
+            "api-key",
+            "apikey",
+            "x-goog-api-key",
+            "x-session-token",
+            "bearer-token",
+        ] {
+            let rendered = format!("{:?}", request_with(&[(name, secret)]));
+            assert!(
+                !rendered.contains(secret),
+                "header '{name}' leaked its value: {rendered}"
+            );
+            assert!(
+                rendered.contains("***"),
+                "header '{name}' should be redacted: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_credential_headers_stay_visible() {
+        // Content type and version headers are not secrets; hiding them would
+        // make debugging protocol mismatches needlessly hard.
+        let rendered = format!(
+            "{:?}",
+            request_with(&[
+                ("content-type", "application/json"),
+                ("anthropic-version", "2023-06-01"),
+            ])
+        );
+        assert!(rendered.contains("application/json"));
+        assert!(rendered.contains("2023-06-01"));
+        assert!(!rendered.contains("***"));
+    }
+
+    #[test]
+    fn other_fields_remain_visible() {
+        let rendered = format!("{:?}", request_with(&[("x-api-key", "secret")]));
+        assert!(rendered.contains("https://api.example.com/v1/messages"));
+        assert!(rendered.contains("Post"));
+        assert!(rendered.contains("stream: true"));
+        assert!(rendered.contains("model"));
+    }
+
+    #[test]
+    fn is_sensitive_header_recognises_credential_names() {
+        for name in [
+            "authorization",
+            "X-API-Key",
+            "apikey",
+            "refresh_token",
+            "API-KEY",
+        ] {
+            assert!(is_sensitive_header(name), "{name} should be sensitive");
+        }
+        for name in ["content-type", "user-agent", "anthropic-version", "accept"] {
+            assert!(!is_sensitive_header(name), "{name} should not be sensitive");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -53,24 +177,31 @@ pub struct StreamState {
 /// Implement this to get full `LlmProvider` functionality,
 /// wrapped automatically by `GenericProvider`.
 ///
-/// Implementors need:
+/// Implementors must provide:
 /// - [`build_request`](RawAdapter::build_request) - Build HTTP request
-/// - [`execute_stream`](RawAdapter::execute_stream) - Execute streaming request and parse SSE
-/// - [`parse_sse_stream`](RawAdapter::parse_sse_stream) - Parse SSE from pre-fetched response (optional)
-/// - [`parse_response`](RawAdapter::parse_response) - Parse non-streaming response (optional)
+/// - [`execute_stream`](RawAdapter::execute_stream) - Required to implement, but
+///   `GenericProvider` does not call it; it is the hook for adapters that own the
+///   whole send-and-parse flow
+/// - [`parse_sse_stream`](RawAdapter::parse_sse_stream) - Parse SSE from a
+///   pre-fetched response. **Override this for streaming to work**: the default
+///   returns an error, and it is this method `GenericProvider` calls.
 /// - [`capabilities`](RawAdapter::capabilities) - Declare capabilities
 /// - [`info`](RawAdapter::info) - Provide info
 ///
+/// Optional:
+/// - [`parse_response`](RawAdapter::parse_response) - Parse non-streaming response
+///   (default returns an error). `chat()` only falls back to streaming when
+///   `supported_modes()` omits `CallMode::Once` — since that is not the default,
+///   an adapter that does not implement `parse_response` must also narrow
+///   `supported_modes`, or `chat()` will return the default error.
+///
 /// Note: the adapter is fully responsible for stream parsing, including SSE frame
-/// parsing and incremental tool call assembly. GenericProvider does not介入 stream details.
+/// parsing and incremental tool call assembly. GenericProvider does not get involved
+/// in stream details.
 #[async_trait]
 pub trait RawAdapter: Send + Sync {
     /// Build HTTP request.
-    fn build_request(
-        &self,
-        request: &ChatRequest,
-        mode: CallMode,
-    ) -> Result<RawRequest, LlmError>;
+    fn build_request(&self, request: &ChatRequest, mode: CallMode) -> Result<RawRequest, LlmError>;
 
     /// Execute streaming request, fully parse SSE response.
     ///
@@ -96,15 +227,16 @@ pub trait RawAdapter: Send + Sync {
     /// (with retry logic applied). The adapter only needs to parse the SSE stream,
     /// not send the HTTP request.
     ///
-    /// Default implementation: calls execute_stream (for backward compatibility).
+    /// Default implementation: returns an error. Adapters must override this —
+    /// GenericProvider calls it rather than [`execute_stream`](Self::execute_stream)
+    /// once a response is in hand, so an unimplemented override surfaces as a
+    /// stream error rather than a silently re-sent request.
     async fn parse_sse_stream(
         &self,
         _client: &dyn HttpClient,
         _request: RawRequest,
         _response: super::http_client::HttpResponse,
     ) -> Result<ChatStream, LlmError> {
-        // Default: delegate to execute_stream (which will re-send the request)
-        // Adapters should override this for proper retry support
         Err(LlmError::llm("parse_sse_stream not implemented"))
     }
 
