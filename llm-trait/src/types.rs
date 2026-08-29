@@ -57,7 +57,11 @@ mod tests {
             total_tokens: None,
             reasoning_tokens: None,
         });
-        assert_eq!(acc.prompt_tokens, Some(5), "prompt survives the partial event");
+        assert_eq!(
+            acc.prompt_tokens,
+            Some(5),
+            "prompt survives the partial event"
+        );
         assert_eq!(acc.completion_tokens, Some(26), "later Some wins");
         assert_eq!(acc.total_tokens, Some(7));
     }

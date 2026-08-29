@@ -20,18 +20,12 @@ pub trait LlmProvider: Send + Sync {
     /// Streaming call (returns chunks in real-time).
     ///
     /// Use for: chat interfaces, real-time output, long text generation.
-    async fn stream(
-        &self,
-        request: ChatRequest,
-    ) -> Result<ChatStream, LlmError>;
+    async fn stream(&self, request: ChatRequest) -> Result<ChatStream, LlmError>;
 
     /// Non-streaming call (returns complete result at once).
     ///
     /// Use for: API services, batch processing, testing.
-    async fn chat(
-        &self,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, LlmError>;
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError>;
 
     /// Get provider capabilities.
     fn capabilities(&self) -> Capabilities;
@@ -43,7 +37,6 @@ pub trait LlmProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Protocol;
     use crate::message::ChatMessage;
     use crate::response::{FinishReason, StreamChunk};
     use crate::types::UsageInfo;
@@ -54,18 +47,14 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for MockProvider {
-        async fn stream(
-            &self,
-            _request: ChatRequest,
-        ) -> Result<ChatStream, LlmError> {
+        async fn stream(&self, _request: ChatRequest) -> Result<ChatStream, LlmError> {
             let chunks = vec![Ok(StreamChunk::Text("mock response".into()))];
-            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(chunks))))
+            Ok(ChatStream::new(Box::pin(futures_util::stream::iter(
+                chunks,
+            ))))
         }
 
-        async fn chat(
-            &self,
-            _request: ChatRequest,
-        ) -> Result<ChatResponse, LlmError> {
+        async fn chat(&self, _request: ChatRequest) -> Result<ChatResponse, LlmError> {
             Ok(ChatResponse {
                 content: "mock response".to_string(),
                 reasoning_content: None,

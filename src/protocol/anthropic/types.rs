@@ -168,28 +168,48 @@ mod tests {
     fn content_block_delta_text() {
         let json = json!({"type": "text_delta", "text": "hello"});
         let delta: ContentBlockDelta = serde_json::from_value(json).unwrap();
-        assert_eq!(delta, ContentBlockDelta::TextDelta { text: "hello".into() });
+        assert_eq!(
+            delta,
+            ContentBlockDelta::TextDelta {
+                text: "hello".into()
+            }
+        );
     }
 
     #[test]
     fn content_block_delta_thinking() {
         let json = json!({"type": "thinking_delta", "thinking": "hmm"});
         let delta: ContentBlockDelta = serde_json::from_value(json).unwrap();
-        assert_eq!(delta, ContentBlockDelta::ThinkingDelta { thinking: "hmm".into() });
+        assert_eq!(
+            delta,
+            ContentBlockDelta::ThinkingDelta {
+                thinking: "hmm".into()
+            }
+        );
     }
 
     #[test]
     fn content_block_delta_input_json() {
         let json = json!({"type": "input_json_delta", "partial_json": "{\"q\":\""});
         let delta: ContentBlockDelta = serde_json::from_value(json).unwrap();
-        assert_eq!(delta, ContentBlockDelta::InputJsonDelta { partial_json: "{\"q\":\"".into() });
+        assert_eq!(
+            delta,
+            ContentBlockDelta::InputJsonDelta {
+                partial_json: "{\"q\":\"".into()
+            }
+        );
     }
 
     #[test]
     fn content_block_delta_signature_parses_correctly() {
         let json = json!({"type": "signature_delta", "signature": "abc"});
         let delta: ContentBlockDelta = serde_json::from_value(json).unwrap();
-        assert_eq!(delta, ContentBlockDelta::SignatureDelta { signature: "abc".to_string() });
+        assert_eq!(
+            delta,
+            ContentBlockDelta::SignatureDelta {
+                signature: "abc".to_string()
+            }
+        );
     }
 
     #[test]
@@ -211,7 +231,8 @@ mod tests {
 
     #[test]
     fn usage_deserializes_minimal() {
-        let usage: Usage = serde_json::from_value(json!({"input_tokens": 12, "output_tokens": 5})).unwrap();
+        let usage: Usage =
+            serde_json::from_value(json!({"input_tokens": 12, "output_tokens": 5})).unwrap();
         assert_eq!(usage.input_tokens, 12);
         assert_eq!(usage.output_tokens, 5);
         assert!(usage.cache_creation_input_tokens.is_none());
@@ -250,7 +271,10 @@ mod tests {
         });
         let event: MessagesStreamEvent = serde_json::from_value(json).unwrap();
         match event {
-            MessagesStreamEvent::ContentBlockStart { index, content_block } => {
+            MessagesStreamEvent::ContentBlockStart {
+                index,
+                content_block,
+            } => {
                 assert_eq!(index, 0);
                 assert!(matches!(content_block, ContentBlock::ToolUse { id, .. } if id == "tu_1"));
             }

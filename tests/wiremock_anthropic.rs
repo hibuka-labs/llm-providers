@@ -6,9 +6,8 @@
 //! - Error handling (401/429/500) returns correct LlmError
 //! - Retry logic (429 auto-retry, 401 no retry)
 
-use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider, StreamChunk};
+use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider};
 use llm_unified::{AnthropicProtocol, GenericProvider};
-use futures_util::StreamExt;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -304,9 +303,7 @@ async fn chat_500_returns_api_error() {
 
     Mock::given(method("POST"))
         .and(path("/v1/messages"))
-        .respond_with(
-            ResponseTemplate::new(500).set_body_string("Internal Server Error"),
-        )
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
         .expect(4)
         .mount(&server)
         .await;

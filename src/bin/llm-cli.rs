@@ -130,7 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let response = provider.chat(request).await?;
         println!("{}", response.content);
         eprintln!();
-        eprintln!("[usage] prompt: {:?}, completion: {:?}, total: {:?}",
+        eprintln!(
+            "[usage] prompt: {:?}, completion: {:?}, total: {:?}",
             response.usage.prompt_tokens,
             response.usage.completion_tokens,
             response.usage.total_tokens,

@@ -183,9 +183,7 @@ impl ModelRegistry {
             None => return false,
         };
         let rest = &url[host_start..];
-        let host_end = rest
-            .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
-            .unwrap_or(rest.len());
+        let host_end = rest.find(['/', ':', '?', '#']).unwrap_or(rest.len());
         let host = &rest[..host_end];
 
         // Exact match: host == domain
@@ -266,7 +264,7 @@ mod tests {
         let registry = ModelRegistry::builtin();
         let profile = registry.lookup(
             "mimo-v2.5-pro",
-            Some("https://token-plan-cn.xiaomimimo.com/v1"),
+            Some("https://api.example-mimo.com/v1"),
             None,
         );
         assert_eq!(profile.provider_name, "mimo");
@@ -283,21 +281,21 @@ mod tests {
 
     #[test]
     fn lookup_unknown_model_capabilities_are_false() {
-        // P1-7 FIXED: Default OpenAI fallback now reports reasonable capabilities.
+        // Default OpenAI fallback now reports reasonable capabilities.
         let registry = ModelRegistry::builtin();
         let profile = registry.lookup("some-unknown", Some("https://api.example.com/v1"), None);
         assert!(
             profile.capabilities.supports_streaming,
-            "P1-7 FIXED: default fallback should support streaming"
+            "default fallback should support streaming"
         );
         assert!(
             profile.capabilities.supports_tools,
-            "P1-7 FIXED: default fallback should support tools"
+            "default fallback should support tools"
         );
         assert_eq!(
             profile.capabilities.max_output_tokens,
             Some(16_384),
-            "P1-7 FIXED: default fallback should have max_output_tokens"
+            "default fallback should have max_output_tokens"
         );
     }
 
@@ -315,11 +313,11 @@ mod tests {
 
     #[test]
     fn url_inference_mimo_anthropic() {
-        // MiMo: https://token-plan-cn.xiaomimimo.com/anthropic
+        // MiMo: https://api.example-mimo.com/anthropic
         let registry = ModelRegistry::builtin();
         let profile = registry.lookup(
             "mimo-v2.5-pro",
-            Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
+            Some("https://api.example-mimo.com/anthropic"),
             None,
         );
         assert_eq!(profile.protocol, Protocol::Anthropic);
@@ -352,12 +350,12 @@ mod tests {
     }
 
     #[test]
-    fn url_inference_qwen_token_plan_anthropic() {
-        // Qwen Token Plan: https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic
+    fn url_inference_gateway_anthropic() {
+        // Third-party gateway: https://cn-beijing.maas.example.com/apps/anthropic
         let registry = ModelRegistry::builtin();
         let profile = registry.lookup(
             "qwen-plus",
-            Some("https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"),
+            Some("https://cn-beijing.maas.example.com/apps/anthropic"),
             None,
         );
         assert_eq!(profile.protocol, Protocol::Anthropic);
@@ -369,7 +367,7 @@ mod tests {
         let registry = ModelRegistry::builtin();
         let profile = registry.lookup(
             "mimo-v2.5-pro",
-            Some("https://token-plan-cn.xiaomimimo.com/v1"),
+            Some("https://api.example-mimo.com/v1"),
             None,
         );
         assert_eq!(profile.protocol, Protocol::OpenAi);
@@ -378,19 +376,15 @@ mod tests {
 
     #[test]
     fn url_inference_fake_anthropic_domain_not_matched() {
-        // P2-16: "anthropic.com" substring matching should not match fake domains
+        // "anthropic.com" substring matching should not match fake domains
         let registry = ModelRegistry::builtin();
 
         // notanthropic.com should NOT match
-        let profile = registry.lookup(
-            "some-model",
-            Some("https://notanthropic.com/v1"),
-            None,
-        );
+        let profile = registry.lookup("some-model", Some("https://notanthropic.com/v1"), None);
         assert_eq!(
             profile.protocol,
             Protocol::OpenAi,
-            "P2-16: notanthropic.com should not match Anthropic"
+            "notanthropic.com should not match Anthropic"
         );
 
         // anthropic.com.evil.com should NOT match
@@ -402,7 +396,7 @@ mod tests {
         assert_eq!(
             profile2.protocol,
             Protocol::OpenAi,
-            "P2-16: anthropic.com.evil.com should not match Anthropic"
+            "anthropic.com.evil.com should not match Anthropic"
         );
     }
 

@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use serde_json::Value;
 
 use llm_trait::{
-    Capabilities, CallMode, ChatMessage, ChatRequest, ChatResponse, ChatStream, FinishReason,
+    CallMode, Capabilities, ChatMessage, ChatRequest, ChatResponse, ChatStream, FinishReason,
     HttpClient, HttpMethod, ImageAttachment, LlmConfig, LlmError, ProviderInfo, RawAdapter,
     RawRequest, ReasoningSpec, StreamChunk, ToolCall, UsageInfo,
 };
@@ -35,10 +35,8 @@ impl AnthropicProtocol {
         Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
-            base_url: base_url
-                .unwrap_or("https://api.anthropic.com")
-                .to_string(),
-            max_tokens: 16_384,  // default 16K
+            base_url: base_url.unwrap_or("https://api.anthropic.com").to_string(),
+            max_tokens: 16_384, // default 16K
             profile: None,
         }
     }
@@ -52,7 +50,7 @@ impl AnthropicProtocol {
                     .and_then(|s| s.parse::<u32>().ok())
                     .or_else(|| v.as_u64().map(|n| n as u32))
             })
-            .unwrap_or(16_384);  // default 16K
+            .unwrap_or(16_384); // default 16K
 
         Self::new(&config.api_key, &config.model, Some(&config.base_url))
             .with_max_tokens(max_tokens)
@@ -126,29 +124,29 @@ impl AnthropicProtocol {
         }
 
         // Handle reasoning: only send if profile says this model supports Thinking mode
-        if let Some(ref rc) = request.reasoning {
-            if let Some(ref profile) = self.profile {
-                let spec = rc.to_spec(profile.reasoning_mode);
-                tracing::debug!(
-                    model = %self.model,
-                    reasoning_mode = ?profile.reasoning_mode,
-                    spec = ?spec,
-                    "Anthropic reasoning config resolved"
-                );
-                if let ReasoningSpec::Thinking { budget_tokens } = spec {
-                    let budget = budget_tokens as u32;
-                    body["thinking"] = serde_json::json!({
-                        "type": "enabled",
-                        "budget_tokens": budget
-                    });
-                    if budget >= effective_max_tokens {
-                        tracing::warn!(
-                            budget_tokens = budget,
-                            original_max_tokens = self.max_tokens,
-                            "budget_tokens >= max_tokens, auto-increasing max_tokens to budget+1"
-                        );
-                        body["max_tokens"] = Value::Number((budget + 1).into());
-                    }
+        if let Some(ref rc) = request.reasoning
+            && let Some(ref profile) = self.profile
+        {
+            let spec = rc.to_spec(profile.reasoning_mode);
+            tracing::debug!(
+                model = %self.model,
+                reasoning_mode = ?profile.reasoning_mode,
+                spec = ?spec,
+                "Anthropic reasoning config resolved"
+            );
+            if let ReasoningSpec::Thinking { budget_tokens } = spec {
+                let budget = budget_tokens as u32;
+                body["thinking"] = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": budget
+                });
+                if budget >= effective_max_tokens {
+                    tracing::warn!(
+                        budget_tokens = budget,
+                        original_max_tokens = self.max_tokens,
+                        "budget_tokens >= max_tokens, auto-increasing max_tokens to budget+1"
+                    );
+                    body["max_tokens"] = Value::Number((budget + 1).into());
                 }
             }
         }
@@ -163,17 +161,15 @@ impl AnthropicProtocol {
 
         for msg in messages {
             match msg {
-                ChatMessage::System { content, .. } => {
-                    match &mut system_prompt {
-                        Some(existing) => {
-                            existing.push('\n');
-                            existing.push_str(content);
-                        }
-                        None => {
-                            system_prompt = Some(content.clone());
-                        }
+                ChatMessage::System { content, .. } => match &mut system_prompt {
+                    Some(existing) => {
+                        existing.push('\n');
+                        existing.push_str(content);
                     }
-                }
+                    None => {
+                        system_prompt = Some(content.clone());
+                    }
+                },
                 ChatMessage::User {
                     content, images, ..
                 } => {
@@ -274,7 +270,7 @@ impl AnthropicProtocol {
                     }));
                 }
                 ChatMessage::Custom { .. } => {
-                    // P2-19: Custom messages are metadata-only, not forwarded to LLM
+                    // Custom messages are metadata-only, not forwarded to LLM
                 }
             }
         }
@@ -293,16 +289,15 @@ impl AnthropicProtocol {
                 false
             };
 
-            if can_merge {
-                if let Some(prev) = merged.last_mut() {
-                    if let (Some(prev_content), Some(new_content)) = (
-                        prev.get_mut("content").and_then(|c| c.as_array_mut()),
-                        msg.get("content").and_then(|c| c.as_array()),
-                    ) {
-                        prev_content.extend(new_content.iter().cloned());
-                        continue;
-                    }
-                }
+            if can_merge
+                && let Some(prev) = merged.last_mut()
+                && let (Some(prev_content), Some(new_content)) = (
+                    prev.get_mut("content").and_then(|c| c.as_array_mut()),
+                    msg.get("content").and_then(|c| c.as_array()),
+                )
+            {
+                prev_content.extend(new_content.iter().cloned());
+                continue;
             }
 
             merged.push(msg);
@@ -440,7 +435,9 @@ impl AnthropicProtocol {
                 )));
             }
             MessagesStreamEvent::Unknown => {
-                tracing::debug!("Ignoring unknown Anthropic-protocol SSE event (provider extensions like DeepSeek ping)");
+                tracing::debug!(
+                    "Ignoring unknown Anthropic-protocol SSE event (provider extensions like DeepSeek ping)"
+                );
                 vec![]
             }
         };
@@ -560,11 +557,7 @@ impl AnthropicProtocol {
 
 #[async_trait]
 impl RawAdapter for AnthropicProtocol {
-    fn build_request(
-        &self,
-        request: &ChatRequest,
-        mode: CallMode,
-    ) -> Result<RawRequest, LlmError> {
+    fn build_request(&self, request: &ChatRequest, mode: CallMode) -> Result<RawRequest, LlmError> {
         let stream = mode == CallMode::Stream;
         let body = self.build_anthropic_request(request, stream)?;
 
@@ -624,16 +617,12 @@ impl RawAdapter for AnthropicProtocol {
         let chunk_stream = event_stream.flat_map(|event| match event {
             Ok(es_event) => {
                 match serde_json::from_str::<MessagesStreamEvent>(&es_event.data) {
-                    Ok(stream_event) => {
-                        match Self::convert_event(stream_event) {
-                            Ok(chunks) => {
-                                futures_util::stream::iter(chunks.into_iter().map(Ok).collect::<Vec<_>>())
-                            }
-                            Err(e) => {
-                                futures_util::stream::iter(vec![Err(e)])
-                            }
-                        }
-                    }
+                    Ok(stream_event) => match Self::convert_event(stream_event) {
+                        Ok(chunks) => futures_util::stream::iter(
+                            chunks.into_iter().map(Ok).collect::<Vec<_>>(),
+                        ),
+                        Err(e) => futures_util::stream::iter(vec![Err(e)]),
+                    },
                     Err(e) => {
                         tracing::warn!("Failed to parse SSE event: {e}, data: {}", es_event.data);
                         // Propagate parse error instead of swallowing
@@ -643,9 +632,9 @@ impl RawAdapter for AnthropicProtocol {
                     }
                 }
             }
-            Err(e) => futures_util::stream::iter(vec![Err(LlmError::stream(format!(
-                "SSE error: {e}"
-            )))]),
+            Err(e) => {
+                futures_util::stream::iter(vec![Err(LlmError::stream(format!("SSE error: {e}")))])
+            }
         });
 
         Ok(ChatStream::new(Box::pin(chunk_stream)))
@@ -699,8 +688,8 @@ pub mod fuzz_exports {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_trait::{Protocol, ReasoningConfig, ReasoningMode};
     use crate::protocol::anthropic::types::AnthropicError;
+    use llm_trait::{Protocol, ReasoningConfig, ReasoningMode};
 
     fn make_protocol() -> AnthropicProtocol {
         AnthropicProtocol::new("sk-test", "claude-sonnet", None)
@@ -721,7 +710,6 @@ mod tests {
                 supports_thinking: true,
                 max_context_tokens: Some(1_000_000),
                 max_output_tokens: Some(16_384),
-                ..Default::default()
             },
             reasoning_mode: ReasoningMode::Thinking,
             supported_extra_params: &[],
@@ -814,7 +802,7 @@ mod tests {
 
     #[test]
     fn convert_messages_multiple_system_messages_merged() {
-        // P2-15: Multiple System messages should be merged, not just keep the last one.
+        // Multiple System messages should be merged, not just keep the last one.
         let msgs = vec![
             ChatMessage::system("You are a helpful assistant."),
             ChatMessage::system("Always respond in Chinese."),
@@ -824,18 +812,18 @@ mod tests {
         let system = sys.expect("should have system prompt");
         assert!(
             system.contains("helpful assistant"),
-            "P2-15: first system message should be preserved"
+            "first system message should be preserved"
         );
         assert!(
             system.contains("Chinese"),
-            "P2-15: second system message should be preserved"
+            "second system message should be preserved"
         );
         assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn convert_messages_assistant_reasoning_content_preserved() {
-        // P0-2 FIXED: convert_messages now preserves reasoning_content as a thinking block
+        // convert_messages now preserves reasoning_content as a thinking block
         // when thinking_signature is present.
         let msgs = vec![
             ChatMessage::user("think about this"),
@@ -905,7 +893,8 @@ mod tests {
     #[test]
     fn build_request_url_with_v1_suffix() {
         // When base_url already ends with /v1, don't double it
-        let proto = AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1"));
+        let proto =
+            AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1"));
         let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert_eq!(raw.url, "https://api.example.com/v1/messages");
@@ -914,7 +903,8 @@ mod tests {
     #[test]
     fn build_request_url_without_v1_suffix() {
         // When base_url doesn't end with /v1, add it
-        let proto = AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com"));
+        let proto =
+            AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com"));
         let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert_eq!(raw.url, "https://api.example.com/v1/messages");
@@ -923,7 +913,8 @@ mod tests {
     #[test]
     fn build_request_url_with_trailing_slash() {
         // Trailing slash should not cause double-slash in URL
-        let proto = AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1/"));
+        let proto =
+            AnthropicProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1/"));
         let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert!(
@@ -942,7 +933,7 @@ mod tests {
 
     #[test]
     fn convert_event_error_returns_err() {
-        // P1-4/Finding #12: Error events should return Err (stream-level error),
+        // Error events should return Err (stream-level error),
         // consistent with OpenAI's error handling.
         let event = MessagesStreamEvent::Error {
             error: AnthropicError {
@@ -953,8 +944,14 @@ mod tests {
         let result = AnthropicProtocol::convert_event(event);
         assert!(result.is_err(), "Error event should return Err");
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("overloaded_error"), "Error should contain type");
-        assert!(err_msg.contains("Too many requests"), "Error should contain message");
+        assert!(
+            err_msg.contains("overloaded_error"),
+            "Error should contain type"
+        );
+        assert!(
+            err_msg.contains("Too many requests"),
+            "Error should contain message"
+        );
     }
 
     #[test]
@@ -989,7 +986,11 @@ mod tests {
         let StreamChunk::Usage(u) = &chunks[0] else {
             panic!("expected Usage chunk, got {chunks:?}");
         };
-        assert_eq!(u.prompt_tokens, Some(63), "endpoint-reported input survives");
+        assert_eq!(
+            u.prompt_tokens,
+            Some(63),
+            "endpoint-reported input survives"
+        );
         assert_eq!(u.completion_tokens, Some(26));
 
         let without_input: MessagesStreamEvent = serde_json::from_str(
@@ -1001,7 +1002,10 @@ mod tests {
         let StreamChunk::Usage(u) = &chunks[0] else {
             panic!("expected Usage chunk, got {chunks:?}");
         };
-        assert_eq!(u.prompt_tokens, None, "absent input stays None for the merger");
+        assert_eq!(
+            u.prompt_tokens, None,
+            "absent input stays None for the merger"
+        );
     }
 
     #[test]
@@ -1020,7 +1024,7 @@ mod tests {
 
     #[test]
     fn build_request_budget_equals_max_tokens_must_increase() {
-        // P2-14: Anthropic requires max_tokens > budget_tokens.
+        // Anthropic requires max_tokens > budget_tokens.
         // When budget == max_tokens, we must increase max_tokens.
         let profile = ModelProfile {
             protocol: Protocol::Anthropic,
@@ -1044,13 +1048,13 @@ mod tests {
 
         assert!(
             max_tokens > budget,
-            "P2-14: max_tokens ({max_tokens}) must be > budget_tokens ({budget}), Anthropic rejects equal values"
+            "max_tokens ({max_tokens}) must be > budget_tokens ({budget}), Anthropic rejects equal values"
         );
     }
 
     #[test]
     fn build_request_uses_profile_max_output_tokens() {
-        // P1-6 FIXED: AnthropicProtocol now uses profile.max_output_tokens.
+        // AnthropicProtocol now uses profile.max_output_tokens.
         let profile = ModelProfile {
             protocol: Protocol::Anthropic,
             provider_name: "anthropic",
@@ -1068,7 +1072,7 @@ mod tests {
 
         assert_eq!(
             max_tokens, 64_000,
-            "P1-6 FIXED: Anthropic should use profile.max_output_tokens"
+            "Anthropic should use profile.max_output_tokens"
         );
     }
 
@@ -1133,17 +1137,29 @@ mod tests {
         let body = serde_json::json!({
             "error": {"message": "rate limited", "type": "rate_error"}
         });
-        let result = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap());
+        let result =
+            AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("rate_error: rate limited"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("rate_error: rate limited")
+        );
     }
 
     #[test]
     fn parse_response_error_missing_fields() {
         let body = serde_json::json!({"error": {}});
-        let result = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap());
+        let result =
+            AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("api_error: unknown error"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("api_error: unknown error")
+        );
     }
 
     // ── parse_anthropic_response: stop_reason variants ──
@@ -1155,7 +1171,8 @@ mod tests {
             "stop_reason": "max_tokens",
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.finish_reason, FinishReason::Length);
     }
 
@@ -1166,7 +1183,8 @@ mod tests {
             "stop_reason": "stop_sequence",
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.finish_reason, FinishReason::Stop);
     }
 
@@ -1177,7 +1195,8 @@ mod tests {
             "stop_reason": "refusal",
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.finish_reason, FinishReason::ContentFilter);
     }
 
@@ -1188,8 +1207,12 @@ mod tests {
             "stop_reason": "something_new",
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
-        assert_eq!(resp.finish_reason, FinishReason::Other("something_new".into()));
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
+        assert_eq!(
+            resp.finish_reason,
+            FinishReason::Other("something_new".into())
+        );
     }
 
     #[test]
@@ -1198,7 +1221,8 @@ mod tests {
             "content": [{"type": "text", "text": "x"}],
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.finish_reason, FinishReason::Stop);
     }
 
@@ -1209,7 +1233,8 @@ mod tests {
         let body = serde_json::json!({
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.content, "");
         assert!(resp.tool_calls.is_empty());
     }
@@ -1219,7 +1244,8 @@ mod tests {
         let body = serde_json::json!({
             "content": [{"type": "text", "text": "x"}]
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.usage.prompt_tokens, None);
     }
 
@@ -1236,7 +1262,8 @@ mod tests {
             ],
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.tool_calls.len(), 4);
         assert_eq!(resp.tool_calls[0].id, "");
         assert_eq!(resp.tool_calls[0].name, "");
@@ -1257,7 +1284,8 @@ mod tests {
             ],
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.reasoning_content.as_deref(), Some("let me think..."));
         assert_eq!(resp.thinking_signature.as_deref(), Some("sig123"));
         assert_eq!(resp.content, "answer");
@@ -1272,7 +1300,8 @@ mod tests {
             ],
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
-        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp = AnthropicProtocol::parse_anthropic_response(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
         assert_eq!(resp.reasoning_content.as_deref(), Some("hmm"));
         assert_eq!(resp.thinking_signature, None);
     }
@@ -1297,14 +1326,20 @@ mod tests {
     fn convert_messages_custom_filtered() {
         let msgs = vec![
             ChatMessage::user("before"),
-            ChatMessage::Custom { role: "custom".into(), data: serde_json::json!({"secret": true}) },
+            ChatMessage::Custom {
+                role: "custom".into(),
+                data: serde_json::json!({"secret": true}),
+            },
             ChatMessage::user("after"),
         ];
         let (_, out) = AnthropicProtocol::convert_messages(&msgs);
         // Custom filtered, two users merged
         assert_eq!(out.len(), 1);
         let content = out[0]["content"].as_array().unwrap();
-        let text: String = content.iter().map(|c| c["text"].as_str().unwrap_or("")).collect();
+        let text: String = content
+            .iter()
+            .map(|c| c["text"].as_str().unwrap_or(""))
+            .collect();
         assert!(!text.contains("secret"));
     }
 
@@ -1425,8 +1460,7 @@ mod tests {
                 "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}
             }
         })];
-        let req = ChatRequest::new(vec![ChatMessage::user("search for cats")])
-            .with_tools(tools);
+        let req = ChatRequest::new(vec![ChatMessage::user("search for cats")]).with_tools(tools);
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert!(raw.body["tools"].is_array());
         assert_eq!(raw.body["tools"].as_array().unwrap().len(), 1);
@@ -1445,7 +1479,8 @@ mod tests {
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::system(&s)),
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::user(&s)),
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::assistant(&s)),
-                ("[a-z]{1,10}", "[a-z ]{0,50}").prop_map(|(id, content)| ChatMessage::tool(&id, &content)),
+                ("[a-z]{1,10}", "[a-z ]{0,50}")
+                    .prop_map(|(id, content)| ChatMessage::tool(&id, &content)),
             ]
         }
 

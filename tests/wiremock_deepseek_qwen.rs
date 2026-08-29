@@ -6,9 +6,8 @@
 //! - Provider info() returns correct name (from registry)
 //! - create_provider() routes correctly
 
-use llm_trait::{ChatMessage, ChatRequest, LlmProvider, StreamChunk};
-use llm_unified::{create_provider, GenericProvider, OpenAiProtocol};
-use futures_util::StreamExt;
+use llm_trait::{ChatMessage, ChatRequest, LlmProvider};
+use llm_unified::{GenericProvider, OpenAiProtocol, create_provider};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -33,16 +32,22 @@ fn sse_data(data: &str) -> String {
 
 fn sse_text_body(text: &str) -> String {
     let mut body = String::new();
-    body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-s",
-        "object": "chat.completion.chunk",
-        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": null}]
-    }).to_string()));
-    body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-s",
-        "object": "chat.completion.chunk",
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-    }).to_string()));
+    body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-s",
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": null}]
+        })
+        .to_string(),
+    ));
+    body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-s",
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+        })
+        .to_string(),
+    ));
     body.push_str("data: [DONE]\n\n");
     body
 }
@@ -222,7 +227,7 @@ fn factory_routes_mimo() {
         protocol: None,
         api_key: "tp-test".to_string(),
         model: "mimo-v2.5-pro".to_string(),
-        base_url: "https://token-plan-cn.xiaomimimo.com/v1".to_string(),
+        base_url: "https://api.example-mimo.com/v1".to_string(),
         options: Default::default(),
     };
     let provider = create_provider(&config).unwrap();

@@ -38,8 +38,5 @@ pub fn profiles() -> Vec<(&'static str, ModelProfile)> {
 }
 
 pub fn brand_prefixes() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("claude-", "claude"),
-        ("anthropic-", "anthropic"),
-    ]
+    vec![("claude-", "claude"), ("anthropic-", "anthropic")]
 }

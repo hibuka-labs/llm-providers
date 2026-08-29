@@ -198,7 +198,11 @@ mod tests {
     fn chat_message_user() {
         let msg = ChatMessage::user("hello");
         match &msg {
-            ChatMessage::User { content, images, ephemeral } => {
+            ChatMessage::User {
+                content,
+                images,
+                ephemeral,
+            } => {
                 assert_eq!(content, "hello");
                 assert!(images.is_empty());
                 assert!(!ephemeral);
@@ -254,7 +258,11 @@ mod tests {
     fn chat_message_tool() {
         let msg = ChatMessage::tool("id1", "result");
         match &msg {
-            ChatMessage::Tool { tool_call_id, name, content } => {
+            ChatMessage::Tool {
+                tool_call_id,
+                name,
+                content,
+            } => {
                 assert_eq!(tool_call_id, "id1");
                 assert!(name.is_none());
                 assert_eq!(content, "result");
@@ -267,7 +275,11 @@ mod tests {
     fn chat_message_tool_with_name() {
         let msg = ChatMessage::tool_with_name("id1", "echo", "result");
         match &msg {
-            ChatMessage::Tool { tool_call_id, name, content } => {
+            ChatMessage::Tool {
+                tool_call_id,
+                name,
+                content,
+            } => {
                 assert_eq!(tool_call_id, "id1");
                 assert_eq!(name.as_deref(), Some("echo"));
                 assert_eq!(content, "result");

@@ -33,13 +33,13 @@ pub fn create_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, LlmEr
     }
 
     // 1. Validate explicit protocol
-    if let Some(protocol) = config.protocol {
-        if !matches!(protocol, Protocol::OpenAi | Protocol::Anthropic) {
-            return Err(LlmError::config(&format!(
-                "Unsupported protocol '{}'. Use 'openai' or 'anthropic'.",
-                protocol.as_str()
-            )));
-        }
+    if let Some(protocol) = config.protocol
+        && !matches!(protocol, Protocol::OpenAi | Protocol::Anthropic)
+    {
+        return Err(LlmError::config(format!(
+            "Unsupported protocol '{}'. Use 'openai' or 'anthropic'.",
+            protocol.as_str()
+        )));
     }
 
     // 2. Query registry
@@ -172,7 +172,7 @@ mod tests {
             protocol: None,
             api_key: "tp-test".to_string(),
             model: "mimo-v2.5-pro".to_string(),
-            base_url: "https://token-plan-cn.xiaomimimo.com/v1".to_string(),
+            base_url: "https://api.example-mimo.com/v1".to_string(),
             options: Default::default(),
         };
         let provider = create_provider(&config).unwrap();
@@ -182,7 +182,7 @@ mod tests {
         // Verify MiMo's reasoning_mode is None
         let profile = MODEL_REGISTRY.lookup(
             "mimo-v2.5-pro",
-            Some("https://token-plan-cn.xiaomimimo.com/v1"),
+            Some("https://api.example-mimo.com/v1"),
             None,
         );
         assert_eq!(profile.reasoning_mode, ReasoningMode::None);
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn create_provider_openai_responses_returns_error() {
-        // P0-1 FIXED: Previously silently downgraded to OpenAI.
+        // Previously silently downgraded to OpenAI.
         // Now returns a clear error for unsupported protocols.
         let config = LlmConfig {
             protocol: Some(Protocol::OpenAiResponses),
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn create_provider_options_max_tokens_ignored() {
-        // P1-10 VERIFY: LlmConfig.options["max_tokens"] is never used by the factory.
+        // LlmConfig.options["max_tokens"] is never used by the factory.
         // OpenAiProtocol::from_config reads it, but build_protocol calls ::new() instead.
         use std::collections::HashMap;
         let mut options = HashMap::new();
@@ -250,6 +250,6 @@ mod tests {
         // We can't directly check max_tokens from the provider, but we can verify
         // the provider was created successfully (no error from invalid max_tokens).
         assert_eq!(provider.info().name, "openai");
-        // P1-10 CONFIRMED: options["max_tokens"]=42 was silently ignored.
+        // options["max_tokens"]=42 was silently ignored.
     }
 }

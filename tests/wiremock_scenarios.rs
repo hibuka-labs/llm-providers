@@ -4,8 +4,7 @@
 //! MiMo returning 400 because reasoning_effort was unconditionally sent.
 
 use llm_trait::{
-    ChatMessage, ChatRequest, LlmConfig, LlmProvider, Protocol, ReasoningConfig, ReasoningEffort,
-    ReasoningMode,
+    ChatMessage, ChatRequest, LlmConfig, Protocol, ReasoningConfig, ReasoningEffort, ReasoningMode,
 };
 use llm_unified::{create_provider, model_registry::ModelRegistry};
 use wiremock::matchers::{method, path};
@@ -201,7 +200,7 @@ fn registry_mimo_reasoning_mode_none() {
     let registry = ModelRegistry::builtin();
     let profile = registry.lookup(
         "mimo-v2.5-pro",
-        Some("https://token-plan-cn.xiaomimimo.com/v1"),
+        Some("https://api.example-mimo.com/v1"),
         None,
     );
     assert_eq!(profile.reasoning_mode, ReasoningMode::None);
@@ -212,11 +211,7 @@ fn registry_mimo_reasoning_mode_none() {
 #[test]
 fn registry_deepseek_reasoning_mode_effort() {
     let registry = ModelRegistry::builtin();
-    let profile = registry.lookup(
-        "deepseek-chat",
-        Some("https://api.deepseek.com/v1"),
-        None,
-    );
+    let profile = registry.lookup("deepseek-chat", Some("https://api.deepseek.com/v1"), None);
     assert_eq!(profile.reasoning_mode, ReasoningMode::Effort);
     assert_eq!(profile.provider_name, "deepseek");
 }

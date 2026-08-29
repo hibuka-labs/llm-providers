@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use serde_json::Value;
 
 use llm_trait::{
-    Capabilities, CallMode, ChatMessage, ChatRequest, ChatResponse, ChatStream, FinishReason,
+    CallMode, Capabilities, ChatMessage, ChatRequest, ChatResponse, ChatStream, FinishReason,
     HttpClient, HttpMethod, ImageAttachment, ImageDetail, LlmConfig, LlmError, ProviderInfo,
     RawAdapter, RawRequest, ReasoningSpec, StreamChunk, ToolCall, UsageInfo,
 };
@@ -36,10 +36,8 @@ impl OpenAiProtocol {
         Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
-            base_url: base_url
-                .unwrap_or("https://api.openai.com/v1")
-                .to_string(),
-            max_tokens: 16_384,  // default 16K
+            base_url: base_url.unwrap_or("https://api.openai.com/v1").to_string(),
+            max_tokens: 16_384, // default 16K
             profile: None,
         }
     }
@@ -53,7 +51,7 @@ impl OpenAiProtocol {
                     .and_then(|s| s.parse::<u32>().ok())
                     .or_else(|| v.as_u64().map(|n| n as u32))
             })
-            .unwrap_or(16_384);  // default 16K
+            .unwrap_or(16_384); // default 16K
 
         Self::new(&config.api_key, &config.model, Some(&config.base_url))
             .with_max_tokens(max_tokens)
@@ -76,11 +74,7 @@ impl OpenAiProtocol {
     }
 
     /// Build OpenAI Chat Completions request body from ChatRequest.
-    fn build_openai_request(
-        &self,
-        request: &ChatRequest,
-        stream: bool,
-    ) -> Result<Value, LlmError> {
+    fn build_openai_request(&self, request: &ChatRequest, stream: bool) -> Result<Value, LlmError> {
         let messages = Self::convert_messages(&request.messages);
         let tools = Self::convert_tools(&request.tools);
 
@@ -123,7 +117,7 @@ impl OpenAiProtocol {
             "max_tokens": effective_max_tokens,
         });
 
-        // P2-18: Request usage data in stream mode
+        // Request usage data in stream mode
         if stream {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
@@ -134,27 +128,27 @@ impl OpenAiProtocol {
         }
 
         // Handle reasoning: only send if profile says this model supports Effort mode
-        if let Some(ref rc) = request.reasoning {
-            if let Some(ref profile) = self.profile {
-                let spec = rc.to_spec(profile.reasoning_mode);
-                tracing::debug!(
-                    model = %self.model,
-                    reasoning_mode = ?profile.reasoning_mode,
-                    spec = ?spec,
-                    "reasoning config resolved"
-                );
-                if let ReasoningSpec::Effort(effort) = spec {
-                    let effort_str = match effort {
-                        llm_trait::ReasoningEffort::Low => "low",
-                        llm_trait::ReasoningEffort::Medium => "medium",
-                        llm_trait::ReasoningEffort::High => "high",
-                        // ReasoningEffort::None is filtered out by to_spec(),
-                        // so ReasoningSpec::Effort(None) never reaches here.
-                        llm_trait::ReasoningEffort::None => unreachable!(),
-                        llm_trait::ReasoningEffort::XHigh => "high",
-                    };
-                    body["reasoning_effort"] = Value::String(effort_str.to_string());
-                }
+        if let Some(ref rc) = request.reasoning
+            && let Some(ref profile) = self.profile
+        {
+            let spec = rc.to_spec(profile.reasoning_mode);
+            tracing::debug!(
+                model = %self.model,
+                reasoning_mode = ?profile.reasoning_mode,
+                spec = ?spec,
+                "reasoning config resolved"
+            );
+            if let ReasoningSpec::Effort(effort) = spec {
+                let effort_str = match effort {
+                    llm_trait::ReasoningEffort::Low => "low",
+                    llm_trait::ReasoningEffort::Medium => "medium",
+                    llm_trait::ReasoningEffort::High => "high",
+                    // ReasoningEffort::None is filtered out by to_spec(),
+                    // so ReasoningSpec::Effort(None) never reaches here.
+                    llm_trait::ReasoningEffort::None => unreachable!(),
+                    llm_trait::ReasoningEffort::XHigh => "high",
+                };
+                body["reasoning_effort"] = Value::String(effort_str.to_string());
             }
         }
 
@@ -280,7 +274,7 @@ impl OpenAiProtocol {
                     }));
                 }
                 ChatMessage::Custom { .. } => {
-                    // P2-19: Custom messages are metadata-only, not forwarded to LLM
+                    // Custom messages are metadata-only, not forwarded to LLM
                 }
             }
         }
@@ -297,100 +291,89 @@ impl OpenAiProtocol {
                 false
             };
 
-            if can_merge {
-                if let Some(prev) = merged.last_mut() {
-                    if role == "assistant" {
-                        let prev_has_tc = prev.get("tool_calls").map_or(false, |t| t.is_array());
-                        let new_has_tc = msg.get("tool_calls").map_or(false, |t| t.is_array());
+            if can_merge && let Some(prev) = merged.last_mut() {
+                if role == "assistant" {
+                    let prev_has_tc = prev.get("tool_calls").is_some_and(|t| t.is_array());
+                    let new_has_tc = msg.get("tool_calls").is_some_and(|t| t.is_array());
 
-                        // P2-20: Don't merge tool_calls+text into one message.
-                        // OpenAI API requires tool_calls messages to have null/empty content.
-                        if prev_has_tc != new_has_tc {
-                            // One has tool_calls, the other has text — don't merge
-                            merged.push(msg);
-                            continue;
+                    // Don't merge tool_calls+text into one message.
+                    // OpenAI API requires tool_calls messages to have null/empty content.
+                    if prev_has_tc != new_has_tc {
+                        // One has tool_calls, the other has text — don't merge
+                        merged.push(msg);
+                        continue;
+                    }
+
+                    let prev_content = prev.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    let new_content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    let combined_content = if prev_content.is_empty() {
+                        new_content.to_string()
+                    } else if new_content.is_empty() {
+                        prev_content.to_string()
+                    } else {
+                        format!("{}\n{}", prev_content, new_content)
+                    };
+                    if !combined_content.is_empty() {
+                        prev["content"] = Value::String(combined_content);
+                    }
+
+                    if let Some(new_tc) = msg.get("tool_calls").and_then(|t| t.as_array()) {
+                        if let Some(prev_tc) =
+                            prev.get_mut("tool_calls").and_then(|t| t.as_array_mut())
+                        {
+                            prev_tc.extend(new_tc.iter().cloned());
+                        } else {
+                            prev["tool_calls"] = Value::Array(new_tc.clone());
                         }
+                    }
+                    continue;
+                }
+                if role == "user" {
+                    let prev_is_array = prev.get("content").is_some_and(|c| c.is_array());
+                    let new_is_array = msg.get("content").is_some_and(|c| c.is_array());
 
+                    if prev_is_array || new_is_array {
+                        // Either side has array content (images) — merge as arrays
+                        let mut prev_parts: Vec<Value> = prev
+                            .get("content")
+                            .and_then(|c| c.as_array())
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                // Convert string content to a text part
+                                prev.get("content")
+                                    .and_then(|c| c.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| vec![serde_json::json!({"type": "text", "text": s})])
+                                    .unwrap_or_default()
+                            });
+                        let new_parts: Vec<Value> = msg
+                            .get("content")
+                            .and_then(|c| c.as_array())
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                msg.get("content")
+                                    .and_then(|c| c.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| vec![serde_json::json!({"type": "text", "text": s})])
+                                    .unwrap_or_default()
+                            });
+                        prev_parts.extend(new_parts);
+                        prev["content"] = Value::Array(prev_parts);
+                    } else {
+                        // Both are strings — merge as strings
                         let prev_content =
                             prev.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let new_content =
-                            msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let combined_content = if prev_content.is_empty() {
+                        let new_content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        let combined = if prev_content.is_empty() {
                             new_content.to_string()
                         } else if new_content.is_empty() {
                             prev_content.to_string()
                         } else {
                             format!("{}\n{}", prev_content, new_content)
                         };
-                        if !combined_content.is_empty() {
-                            prev["content"] = Value::String(combined_content);
-                        }
-
-                        if let Some(new_tc) = msg.get("tool_calls").and_then(|t| t.as_array()) {
-                            if let Some(prev_tc) =
-                                prev.get_mut("tool_calls").and_then(|t| t.as_array_mut())
-                            {
-                                prev_tc.extend(new_tc.iter().cloned());
-                            } else {
-                                prev["tool_calls"] = Value::Array(new_tc.clone());
-                            }
-                        }
-                        continue;
+                        prev["content"] = Value::String(combined);
                     }
-                    if role == "user" {
-                        let prev_is_array =
-                            prev.get("content").map_or(false, |c| c.is_array());
-                        let new_is_array =
-                            msg.get("content").map_or(false, |c| c.is_array());
-
-                        if prev_is_array || new_is_array {
-                            // Either side has array content (images) — merge as arrays
-                            let mut prev_parts: Vec<Value> = prev
-                                .get("content")
-                                .and_then(|c| c.as_array())
-                                .cloned()
-                                .unwrap_or_else(|| {
-                                    // Convert string content to a text part
-                                    prev.get("content")
-                                        .and_then(|c| c.as_str())
-                                        .filter(|s| !s.is_empty())
-                                        .map(|s| {
-                                            vec![serde_json::json!({"type": "text", "text": s})]
-                                        })
-                                        .unwrap_or_default()
-                                });
-                            let new_parts: Vec<Value> = msg
-                                .get("content")
-                                .and_then(|c| c.as_array())
-                                .cloned()
-                                .unwrap_or_else(|| {
-                                    msg.get("content")
-                                        .and_then(|c| c.as_str())
-                                        .filter(|s| !s.is_empty())
-                                        .map(|s| {
-                                            vec![serde_json::json!({"type": "text", "text": s})]
-                                        })
-                                        .unwrap_or_default()
-                                });
-                            prev_parts.extend(new_parts);
-                            prev["content"] = Value::Array(prev_parts);
-                        } else {
-                            // Both are strings — merge as strings
-                            let prev_content =
-                                prev.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            let new_content =
-                                msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            let combined = if prev_content.is_empty() {
-                                new_content.to_string()
-                            } else if new_content.is_empty() {
-                                prev_content.to_string()
-                            } else {
-                                format!("{}\n{}", prev_content, new_content)
-                            };
-                            prev["content"] = Value::String(combined);
-                        }
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -470,7 +453,11 @@ impl OpenAiProtocol {
                             .and_then(|a| a.as_str())
                             .unwrap_or("{}")
                             .to_string();
-                        Some(ToolCall { id, name, arguments })
+                        Some(ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        })
                     })
                     .collect()
             })
@@ -526,16 +513,16 @@ impl OpenAiProtocol {
     fn convert_delta(delta: &Value, index: usize) -> Vec<StreamChunk> {
         let mut chunks = Vec::new();
 
-        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-            if !content.is_empty() {
-                chunks.push(StreamChunk::Text(content.to_string()));
-            }
+        if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+            && !content.is_empty()
+        {
+            chunks.push(StreamChunk::Text(content.to_string()));
         }
 
-        if let Some(reasoning) = delta.get("reasoning_content").and_then(|r| r.as_str()) {
-            if !reasoning.is_empty() {
-                chunks.push(StreamChunk::Thought(reasoning.to_string()));
-            }
+        if let Some(reasoning) = delta.get("reasoning_content").and_then(|r| r.as_str())
+            && !reasoning.is_empty()
+        {
+            chunks.push(StreamChunk::Thought(reasoning.to_string()));
         }
 
         if let Some(tool_calls) = delta.get("tool_calls").and_then(|tc| tc.as_array()) {
@@ -579,11 +566,7 @@ impl OpenAiProtocol {
 
 #[async_trait]
 impl RawAdapter for OpenAiProtocol {
-    fn build_request(
-        &self,
-        request: &ChatRequest,
-        mode: CallMode,
-    ) -> Result<RawRequest, LlmError> {
+    fn build_request(&self, request: &ChatRequest, mode: CallMode) -> Result<RawRequest, LlmError> {
         let stream = mode == CallMode::Stream;
         let body = self.build_openai_request(request, stream)?;
 
@@ -655,7 +638,7 @@ impl RawAdapter for OpenAiProtocol {
 
                 match serde_json::from_str::<Value>(data) {
                     Ok(json) => {
-                        // Check for error object in stream (P1-5 fix)
+                        // Check for error object in stream
                         if let Some(error) = json.get("error") {
                             let msg = error
                                 .get("message")
@@ -944,7 +927,7 @@ mod tests {
     #[test]
     fn convert_messages_consecutive_assistant_must_merge() {
         // Two assistant messages: one with text, one with tool_calls.
-        // P2-20: These should NOT be merged (tool_calls needs null content).
+        // These should NOT be merged (tool_calls needs null content).
         let msgs = vec![
             ChatMessage::assistant("Let me check."),
             ChatMessage::assistant_tool_call("call_1", "search", r#"{"q":"test"}"#),
@@ -974,7 +957,7 @@ mod tests {
 
     #[test]
     fn convert_messages_consecutive_user_with_images_preserves_images() {
-        // P0-3 FIXED: Consecutive user messages with images now merge as arrays.
+        // Consecutive user messages with images now merge as arrays.
         use llm_trait::ImageAttachment;
         let msgs = vec![
             ChatMessage::user_with_images(
@@ -1008,7 +991,7 @@ mod tests {
 
     #[test]
     fn convert_messages_custom_filtered_out() {
-        // P2-19: ChatMessage::Custom should be filtered out, not forwarded to LLM.
+        // ChatMessage::Custom should be filtered out, not forwarded to LLM.
         let msgs = vec![
             ChatMessage::Custom {
                 role: "metadata".to_string(),
@@ -1018,18 +1001,18 @@ mod tests {
         ];
         let out = OpenAiProtocol::convert_messages(&msgs);
         // Custom message should be completely dropped
-        assert_eq!(out.len(), 1, "P2-19: Custom message should be filtered out");
+        assert_eq!(out.len(), 1, "Custom message should be filtered out");
         let content = out[0]["content"].as_str().unwrap();
         assert!(
             !content.contains("should_not_leak"),
-            "P2-19: Custom message data should not appear in output, got: {}",
+            "Custom message data should not appear in output, got: {}",
             content
         );
     }
 
     #[test]
     fn convert_messages_assistant_tool_call_not_merged_with_text() {
-        // P2-20: Merging an assistant+tool_calls message with an assistant+text message
+        // Merging an assistant+tool_calls message with an assistant+text message
         // produces an invalid request. They should not be merged.
         let msgs = vec![
             ChatMessage::assistant_tool_call("call_1", "shell", r#"{"cmd":"ls"}"#),
@@ -1040,7 +1023,7 @@ mod tests {
         assert_eq!(
             out.len(),
             2,
-            "P2-20: assistant+tool_calls and assistant+text should not be merged"
+            "assistant+tool_calls and assistant+text should not be merged"
         );
         // First should have tool_calls, no text content
         assert!(out[0].get("tool_calls").is_some());
@@ -1064,7 +1047,8 @@ mod tests {
     #[test]
     fn build_request_url_with_trailing_slash() {
         // Trailing slash should not cause double-slash in URL
-        let proto = OpenAiProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1/"));
+        let proto =
+            OpenAiProtocol::new("sk-test", "test-model", Some("https://api.example.com/v1/"));
         let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert!(
@@ -1081,14 +1065,14 @@ mod tests {
 
     #[test]
     fn build_request_stream_includes_usage_option() {
-        // P2-18: OpenAI streaming should include stream_options.include_usage
+        // OpenAI streaming should include stream_options.include_usage
         // so that usage data is returned in the stream.
         let proto = make_protocol();
         let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
         let raw = proto.build_request(&req, CallMode::Stream).unwrap();
         assert!(
             raw.body["stream_options"]["include_usage"].as_bool() == Some(true),
-            "P2-18: stream requests should include stream_options.include_usage=true"
+            "stream requests should include stream_options.include_usage=true"
         );
     }
 
@@ -1129,7 +1113,7 @@ mod tests {
 
     #[test]
     fn parse_response_content_filter_finish_reason() {
-        // P2-17: content_filter should map to FinishReason::ContentFilter, not Other
+        // content_filter should map to FinishReason::ContentFilter, not Other
         let body = serde_json::json!({
             "id": "chatcmpl-1",
             "choices": [{
@@ -1148,7 +1132,7 @@ mod tests {
         assert_eq!(
             resp.finish_reason,
             FinishReason::ContentFilter,
-            "P2-17: content_filter should map to ContentFilter, not Other"
+            "content_filter should map to ContentFilter, not Other"
         );
     }
 
@@ -1168,7 +1152,12 @@ mod tests {
         });
         let result = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("rate_error: rate limited"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("rate_error: rate limited")
+        );
     }
 
     #[test]
@@ -1176,7 +1165,12 @@ mod tests {
         let body = serde_json::json!({"error": {}});
         let result = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("api_error: unknown error"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("api_error: unknown error")
+        );
     }
 
     #[test]
@@ -1203,7 +1197,8 @@ mod tests {
             "choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "length"}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
         assert_eq!(resp.finish_reason, FinishReason::Length);
     }
 
@@ -1213,8 +1208,12 @@ mod tests {
             "choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "something_new"}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
-        assert_eq!(resp.finish_reason, FinishReason::Other("something_new".into()));
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(
+            resp.finish_reason,
+            FinishReason::Other("something_new".into())
+        );
     }
 
     #[test]
@@ -1223,7 +1222,8 @@ mod tests {
             "choices": [{"message": {"role": "assistant", "content": "x"}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
         assert_eq!(resp.finish_reason, FinishReason::Stop);
     }
 
@@ -1234,7 +1234,8 @@ mod tests {
         let body = serde_json::json!({
             "choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}]
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
         assert_eq!(resp.usage.prompt_tokens, None);
     }
 
@@ -1256,7 +1257,8 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
         // filter_map skips entries missing id or function or name
         assert_eq!(resp.tool_calls.len(), 1);
         assert_eq!(resp.tool_calls[0].id, "t1");
@@ -1271,7 +1273,8 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         });
-        let resp = OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+        let resp =
+            OpenAiProtocol::parse_openai_response(&serde_json::to_vec(&body).unwrap()).unwrap();
         // Empty reasoning_content is filtered out
         assert_eq!(resp.reasoning_content, None);
     }
@@ -1348,8 +1351,10 @@ mod tests {
             supported_extra_params: &[],
         };
         let proto = make_protocol().with_model_profile(profile);
-        let req = ChatRequest::new(vec![ChatMessage::user("hi")])
-            .with_reasoning(ReasoningConfig { effort: Some(ReasoningEffort::Low), ..Default::default() });
+        let req = ChatRequest::new(vec![ChatMessage::user("hi")]).with_reasoning(ReasoningConfig {
+            effort: Some(ReasoningEffort::Low),
+            ..Default::default()
+        });
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert_eq!(raw.body["reasoning_effort"], "low");
     }
@@ -1364,8 +1369,10 @@ mod tests {
             supported_extra_params: &[],
         };
         let proto = make_protocol().with_model_profile(profile);
-        let req = ChatRequest::new(vec![ChatMessage::user("hi")])
-            .with_reasoning(ReasoningConfig { effort: Some(ReasoningEffort::Medium), ..Default::default() });
+        let req = ChatRequest::new(vec![ChatMessage::user("hi")]).with_reasoning(ReasoningConfig {
+            effort: Some(ReasoningEffort::Medium),
+            ..Default::default()
+        });
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert_eq!(raw.body["reasoning_effort"], "medium");
     }
@@ -1380,8 +1387,10 @@ mod tests {
             supported_extra_params: &[],
         };
         let proto = make_protocol().with_model_profile(profile);
-        let req = ChatRequest::new(vec![ChatMessage::user("hi")])
-            .with_reasoning(ReasoningConfig { effort: Some(ReasoningEffort::XHigh), ..Default::default() });
+        let req = ChatRequest::new(vec![ChatMessage::user("hi")]).with_reasoning(ReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            ..Default::default()
+        });
         let raw = proto.build_request(&req, CallMode::Once).unwrap();
         assert_eq!(raw.body["reasoning_effort"], "high");
     }
@@ -1404,7 +1413,12 @@ mod tests {
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "image_url");
-        assert!(content[1]["image_url"]["url"].as_str().unwrap().contains("data:image/png;base64,abc123"));
+        assert!(
+            content[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .contains("data:image/png;base64,abc123")
+        );
     }
 
     #[test]
@@ -1434,7 +1448,8 @@ mod tests {
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::system(&s)),
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::user(&s)),
                 "[a-z ]{0,50}".prop_map(|s| ChatMessage::assistant(&s)),
-                ("[a-z]{1,10}", "[a-z ]{0,50}").prop_map(|(id, content)| ChatMessage::tool(&id, &content)),
+                ("[a-z]{1,10}", "[a-z ]{0,50}")
+                    .prop_map(|(id, content)| ChatMessage::tool(&id, &content)),
             ]
         }
 

@@ -3,14 +3,14 @@
 //! Trait definitions and core types for LLM providers.
 //!
 //! This crate is the **interface layer** — extremely lightweight, with no heavy
-//! dependencies. It defines the traits and types that both `llm-unified` (implementation)
-//! and `agent-base` (runtime) depend on.
+//! dependencies. It defines the traits and types that both `llm-unified`
+//! (implementation) and consumer applications (runtimes, CLIs, servers) depend on.
 //!
 //! ## Architecture
 //!
 //! ```text
 //! ┌──────────────────────────┐    ┌──────────────────────────┐
-//! │     llm-unified          │    │     agent-base           │
+//! │     llm-unified          │    │     your app             │
 //! │     (implementation)     │    │     (runtime)            │
 //! └──────────┬───────────────┘    └──────────┬───────────────┘
 //!            │                               │
@@ -53,7 +53,7 @@ pub use raw_adapter::{CallMode, HttpMethod, RawAdapter, RawRequest, StreamState}
 pub use reasoning::{ReasoningConfig, ReasoningEffort, ReasoningMode, ReasoningSpec};
 pub use request::{ChatRequest, ResponseFormat};
 pub use response::{
-    ChatResponse, ChatStream, FinishReason, StreamChunk, ToolCall,
-    extract_tool_calls, parse_finish_reason,
+    ChatResponse, ChatStream, FinishReason, StreamChunk, ToolCall, extract_tool_calls,
+    parse_finish_reason,
 };
 pub use types::UsageInfo;

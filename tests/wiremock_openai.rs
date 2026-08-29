@@ -8,10 +8,9 @@
 //! - Tool call incremental assembly
 //! - Error handling (401/429/500)
 
-use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider, StreamChunk};
+use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider};
 use llm_unified::{GenericProvider, OpenAiProtocol};
-use futures_util::StreamExt;
-use wiremock::matchers::{header, method, path, body_string_contains};
+use wiremock::matchers::{body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -21,7 +20,11 @@ fn make_provider(base_url: &str) -> GenericProvider {
     GenericProvider::new(Box::new(protocol))
 }
 
-fn openai_text_response(text: &str, prompt_tokens: u32, completion_tokens: u32) -> serde_json::Value {
+fn openai_text_response(
+    text: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+) -> serde_json::Value {
     serde_json::json!({
         "id": "chatcmpl-test",
         "object": "chat.completion",
@@ -130,42 +133,54 @@ async fn stream_collects_text_from_sse_events() {
     let server = MockServer::start().await;
 
     let mut sse_body = String::new();
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-stream",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {"role": "assistant", "content": ""},
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-stream",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {"content": "Hello "},
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-stream",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {"content": "world!"},
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-stream",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop"
-        }]
-    }).to_string()));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-stream",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"role": "assistant", "content": ""},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-stream",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "Hello "},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-stream",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "world!"},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-stream",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string(),
+    ));
     sse_body.push_str("data: [DONE]\n\n");
 
     Mock::given(method("POST"))
@@ -192,29 +207,35 @@ async fn stream_extracts_usage_from_final_chunk() {
     let server = MockServer::start().await;
 
     let mut sse_body = String::new();
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-usage",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {"content": "hi"},
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-usage",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "prompt_tokens": 15,
-            "completion_tokens": 7,
-            "total_tokens": 22
-        }
-    }).to_string()));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-usage",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "hi"},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-usage",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 7,
+                "total_tokens": 22
+            }
+        })
+        .to_string(),
+    ));
     sse_body.push_str("data: [DONE]\n\n");
 
     Mock::given(method("POST"))
@@ -355,8 +376,8 @@ async fn chat_sends_tools_in_request() {
             }
         }
     })];
-    let request = ChatRequest::new(vec![ChatMessage::user("What's the weather?")])
-        .with_tools(tools);
+    let request =
+        ChatRequest::new(vec![ChatMessage::user("What's the weather?")]).with_tools(tools);
     let response = provider.chat(request).await.unwrap();
 
     assert_eq!(response.content, "No tools needed");
@@ -416,8 +437,15 @@ async fn chat_tool_call_multi_turn() {
 
     let request2 = ChatRequest::new(vec![
         ChatMessage::user("What's the weather in Shanghai?"),
-        ChatMessage::assistant_tool_call(&response.tool_calls[0].id, &response.tool_calls[0].name, &response.tool_calls[0].arguments),
-        ChatMessage::tool(&response.tool_calls[0].id, r#"{"temp": 28, "condition": "sunny"}"#),
+        ChatMessage::assistant_tool_call(
+            &response.tool_calls[0].id,
+            &response.tool_calls[0].name,
+            &response.tool_calls[0].arguments,
+        ),
+        ChatMessage::tool(
+            &response.tool_calls[0].id,
+            r#"{"temp": 28, "condition": "sunny"}"#,
+        ),
     ]);
     let response2 = provider.chat(request2).await.unwrap();
 
@@ -432,58 +460,70 @@ async fn stream_tool_call_full_assembly() {
     let server = MockServer::start().await;
 
     let mut sse_body = String::new();
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-tc",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_full",
-                    "function": {"name": "search", "arguments": ""}
-                }]
-            },
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-tc",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "function": {"arguments": "{\"q\":"}
-                }]
-            },
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-tc",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "function": {"arguments": "\"rust\"}"}
-                }]
-            },
-            "finish_reason": null
-        }]
-    }).to_string()));
-    sse_body.push_str(&sse_data(&serde_json::json!({
-        "id": "chatcmpl-tc",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "tool_calls"
-        }]
-    }).to_string()));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-tc",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_full",
+                        "function": {"name": "search", "arguments": ""}
+                    }]
+                },
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-tc",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": "{\"q\":"}
+                    }]
+                },
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-tc",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": "\"rust\"}"}
+                    }]
+                },
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-tc",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string(),
+    ));
     sse_body.push_str("data: [DONE]\n\n");
 
     Mock::given(method("POST"))
