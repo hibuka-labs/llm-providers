@@ -1,4 +1,30 @@
-/target
+# Rust / Cargo
+/target/
+
+# Environment variables & local API keys
 .env
-docs/
-fuzz/
+.env.*
+!.env.example
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Generated / local artifacts
+coverage/
+lcov.info
+
+# cargo-fuzz working directories.
+# fuzz/artifacts/ holds crash reproducers — keep them out by default; commit
+# a reduced case under fuzz/corpus/<target>/ only deliberately.
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/synthetic-corpora/
+
+# Internal design notes (Chinese, references phi-agent / roadmap).
+# docs/*.md at the top level are the public docs and stay tracked.
+/docs/internal/

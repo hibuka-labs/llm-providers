@@ -1,0 +1,1 @@
+{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"hmm","signature":"sig"}],"stop_reason":"max_tokens","usage":{"input_tokens":1,"output_tokens":2}}
