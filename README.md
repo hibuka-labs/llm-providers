@@ -40,11 +40,19 @@ application code never learns which vendor it is talking to.
 
 | Crate | Version | Description |
 |-------|---------|-------------|
-| `llm-trait` | 0.1.0 | Traits and core types. No heavy deps — safe for library authors to depend on. |
+| `llm-trait` | 0.1.0 | Traits and core types, plus the default reqwest `HttpClient`. Depend on this if you only need to *accept* a provider. |
 | `llm-unified` | 0.1.0 | Protocol adapters, model registry, factory, and the `llm-cli` binary. |
 
-`llm-unified` depends on `llm-trait`. Code that only *consumes* a provider can
-depend on `llm-trait` alone and stay decoupled from concrete implementations.
+`llm-unified` depends on `llm-trait`. Code that only *consumes* a provider — a
+function taking `Arc<dyn LlmProvider>` — can depend on `llm-trait` alone and
+stay decoupled from every vendor adapter, the model registry and the CLI.
+
+One caveat worth stating plainly: `llm-trait` is not dependency-free. It ships
+`ReqwestHttpClient` as the default transport, so it pulls reqwest and its TLS
+stack (~116 transitive packages in total). Keeping the HTTP client in the
+interface crate is what lets adapters be tested against a mock transport without
+depending on `llm-unified`; splitting it into a third crate is open to anyone who
+needs the leaner tree.
 
 ## Install
 
@@ -200,7 +208,7 @@ cargo run --bin llm-cli -- \
    └───────────────────┬────────────────────────┘
                        ▼
    ┌────────────────────────────────────────────┐
-   │  llm-trait (interface; no heavy deps)      │
+   │  llm-trait (interface + default transport) │
    │    LlmProvider, RawAdapter, HttpClient     │
    │    ChatRequest / ChatResponse / ChatStream │
    │    LlmConfig, Capabilities, UsageInfo      │

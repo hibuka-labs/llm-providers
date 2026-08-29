@@ -2,9 +2,16 @@
 //!
 //! Trait definitions and core types for LLM providers.
 //!
-//! This crate is the **interface layer** — extremely lightweight, with no heavy
-//! dependencies. It defines the traits and types that both `llm-unified`
-//! (implementation) and consumer applications (runtimes, CLIs, servers) depend on.
+//! This crate is the **interface layer**: the traits and types that both
+//! `llm-unified` (implementations) and consumer applications (runtimes, CLIs,
+//! servers) depend on. Depending on this crate alone is enough to accept and
+//! call a provider without pulling in any vendor adapter, the model registry,
+//! or the CLI.
+//!
+//! It is not dependency-free: [`ReqwestHttpClient`] is the default transport, so
+//! reqwest and its TLS stack come along. That trade-off is what lets adapters be
+//! unit-tested against a mocked [`HttpClient`] without a second crate in the
+//! dependency graph.
 //!
 //! ## Architecture
 //!
