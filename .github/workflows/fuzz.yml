@@ -20,8 +20,11 @@ name: fuzz
 # 900s ≈ 57M per target. If 25 minutes is too slow for PRs, lower
 # `total_seconds` — the build, not the fuzzing, is most of the floor.
 #
-# PR runs are `continue-on-error` on purpose: a nightly-toolchain or
-# runner-image hiccup should not block a merge. Scheduled runs are the hard gate.
+# PR runs report fuzzing as an advisory warning: a nightly-toolchain or
+# runner-image hiccup should not block a merge. Everything that is *not* fuzzing
+# itself — setup, install, the ASan build, the seed-corpus guard — is a hard
+# failure on every event, so a fuzzer that never started can never look green.
+# Scheduled and dispatched runs treat fuzzing as a hard gate.
 
 on:
   workflow_dispatch:
@@ -53,7 +56,6 @@ jobs:
     name: Fuzz (${{ github.event_name }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'pull_request' && 25 || 60 }}
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
     env:
       # dispatch input > weekly schedule > PR default
       TOTAL_SECONDS: ${{ github.event_name == 'schedule' && '900' || github.event.inputs.total_seconds || '60' }}
@@ -68,8 +70,19 @@ jobs:
           # workspace-root target/ dir (target/<triple>/release/), not fuzz/.
           key: fuzz
 
+      # NOTE the explicit `with: tool`. `@cargo-fuzz` looks like it should work
+      # (the cargo-llvm-cov tag does) but cargo-fuzz is a *branch*, not a tool
+      # tag, so the action gets an empty tool input, installs nothing, and exits
+      # 0 — the failure only surfaces later as `no such command: fuzz`.
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      # Fail loudly here rather than letting a missing binary masquerade as a
+      # fuzzing result.
+      - name: Verify cargo-fuzz is installed
+        run: cargo fuzz --version
 
       - name: Compute per-target budget
         working-directory: fuzz
@@ -95,7 +108,9 @@ jobs:
         run: cargo fuzz build
 
       - name: Fuzz
+        id: fuzz
         working-directory: fuzz
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           for target in $TARGETS; do
@@ -119,6 +134,18 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Advisory only on pull requests: a nightly or runner hiccup should not
+      # block a merge. Setup/build/verify steps above stay hard-failing for
+      # every event — a fuzzer that never ran must never look green.
+      # Uses steps.*.outcome rather than failure(), which is not reliably set
+      # for a step that failed under continue-on-error.
+      - name: Report fuzz outcome
+        if: ${{ steps.fuzz.outcome == 'failure' && github.event_name == 'pull_request' }}
+        run: |
+          echo "::warning::Fuzzing failed on this PR. It is non-blocking by design;"
+          echo "::warning::the weekly Sunday schedule is the hard gate. If a crash was"
+          echo "::warning::found, the reproducer is in the uploaded artifacts."
+
       # Guard: seeds are curated inputs, not fuzz output. If this ever lists
       # files, a step handed libFuzzer a writable path inside the repo.
       - name: Verify seed corpus is untouched
@@ -133,10 +160,12 @@ jobs:
           fi
           echo "seeds/ clean: $(find seeds -type f | wc -l | tr -d ' ') files"
 
-      # Reached only when libFuzzer found a crash: reproducer files land in
-      # fuzz/artifacts/<target>/, plus a symbolised stack trace in the log.
+      # Reproducer files land in fuzz/artifacts/<target>/ plus a symbolised trace
+      # in the log. The steps.fuzz condition is needed because on pull requests
+      # that step is continue-on-error: it can fail (i.e. find a crash) without
+      # failure() being true, and the artifact is the one thing you need then.
       - name: Upload crash artifacts
-        if: failure()
+        if: ${{ failure() || steps.fuzz.outcome == 'failure' }}
         uses: actions/upload-artifact@v5
         with:
           name: crash-artifacts-${{ github.run_number }}
