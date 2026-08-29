@@ -25,6 +25,6 @@ fuzz/corpus/
 fuzz/artifacts/
 fuzz/synthetic-corpora/
 
-# Internal design notes (Chinese, references phi-agent / roadmap).
+# Internal design notes (Chinese; reference private deployments and roadmap).
 # docs/*.md at the top level are the public docs and stay tracked.
 /docs/internal/
