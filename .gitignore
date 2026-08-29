@@ -17,9 +17,8 @@
 coverage/
 lcov.info
 
-# Release tooling state: run logs and step progress markers.
-deploy/logs/
-deploy/.state/
+# Deploy tooling — entire directory is local-only.
+deploy/
 
 # cargo-fuzz working directories.
 # fuzz/artifacts/ holds crash reproducers — keep them out by default; commit
