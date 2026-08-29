@@ -277,15 +277,17 @@ over the three targets:
 
 | Trigger | Total fuzzing | Job timeout | Fails the build? |
 |---------|---------------|-------------|------------------|
-| Pull request | 60s (~20s/target) | 25 min | no (advisory) |
+| Pull request | 60s (~20s/target) | 30 min | no (advisory) |
 | Weekly schedule (Sun 03:00 UTC) | 900s (~300s/target) | 60 min | yes |
 | Manual dispatch | you choose | 60 min | yes |
 
-The fixed floor is the ASan sanitizer build (~3–5 min cold), not the fuzzing:
-at ~63k executions/s a 20s slice is already ~1.3M inputs. PR runs are
-`continue-on-error` deliberately, so a nightly-toolchain hiccup can't block a
-merge; the weekly schedule is the hard gate. To fuzz more, go to **Actions →
-fuzz → Run workflow** and set `total_seconds`.
+A measured 30s dispatch run took **5m10s** wall-clock: 38s to compile
+cargo-fuzz (cached afterwards), 3m37s for the ASan build, ~33s fuzzing, the rest
+setup. So the floor is the **build**, not the fuzzing — that run still managed
+5.5M executions (63k–380k execs/s per target) in its 10s slices. PR runs report
+fuzzing as an advisory warning so a nightly hiccup can't block a merge; the
+weekly schedule is the hard gate. To fuzz more, go to **Actions → fuzz → Run
+workflow** and set `total_seconds`.
 
 Seed corpora live in `fuzz/seeds/<target>/` and are committed — every run starts
 from realistic JSON shapes (valid responses, error bodies, truncated tool-call

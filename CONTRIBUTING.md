@@ -200,15 +200,16 @@ split evenly across the three targets:
 
 | Trigger | Total fuzzing | Job timeout | Fails the build? |
 |---------|---------------|-------------|------------------|
-| Pull request | 60s | 25 min | no (advisory) |
+| Pull request | 60s | 30 min | no (advisory) |
 | Weekly (Sun 03:00 UTC) | 900s | 60 min | yes |
 | Manual dispatch | you choose | 60 min | yes |
 
-The fixed floor is the sanitizer build (~3–5 min cold), not the fuzzing — at
-~63k execs/s a 20s slice is already ~1.3M inputs. PR runs are
-`continue-on-error` so a nightly hiccup can't block a merge; the weekly schedule
-is the hard gate. To fuzz longer: **Actions → fuzz → Run workflow**, set
-`total_seconds`.
+A measured 30s run took 5m10s wall-clock: 38s compiling cargo-fuzz (then
+cached), 3m37s for the ASan build, ~33s fuzzing. The floor is the build, not the
+fuzzing — 10s per target still gave 5.5M executions total. PR runs report
+failures as advisory so a nightly hiccup can't block a merge; the weekly
+schedule is the hard gate. To fuzz longer: **Actions → fuzz → Run workflow**,
+set `total_seconds`.
 
 Seed corpora in `fuzz/seeds/<target>/` are committed. Generated input stays
 ignored (`fuzz/corpus/`, `fuzz/artifacts/`).
