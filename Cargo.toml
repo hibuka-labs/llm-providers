@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "llm-unified"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"  # driven by reqwest 0.13 -> icu 2.3
 description = "Unified LLM provider layer: one trait, many backends (OpenAI, Anthropic, DeepSeek, Qwen, ...)"
@@ -18,7 +18,7 @@ categories = ["api-bindings", "asynchronous"]
 fuzzing = []
 
 [dependencies]
-llm-trait = { path = "llm-trait", version = "0.1.0" }
+llm-trait = { path = "llm-trait", version = "0.1.1" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 eventsource-stream = "0.2"
