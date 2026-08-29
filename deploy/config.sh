@@ -70,19 +70,25 @@ IRREVERSIBLE_STEPS=("version" "publish" "release")
 #   preflight  checks tools/auth/tree cleanliness, never writes anything
 #   gates      fmt, clippy, tests, docs, (fuzz build)
 #   version    LLM proposes the bump from online versions + git log; you confirm
+#   commit     commit the bump locally, before anything is published
 #   publish    cargo publish, sequentially, then confirm crates.io agrees
-#   push       commit + push to origin
+#   push       push the commit that was published
 #   ci         wait for the workflows to go green
 #   tag        create and push v<version>
 #   release    create the GitHub release (LLM drafts the notes, you confirm)
 #   verify     fresh throwaway project that depends only on the published versions
 #
-# One thing worth knowing before you turn this into a habit: publishing before
-# pushing means a version can be burned on crates.io by a commit CI then
-# rejects. Local gates run first, so that needs a CI-only failure (a flaky job
-# or something nightly-specific) to bite. If you would rather never risk it, set
-# the order to: preflight gates version push ci publish verify tag release
-STEPS=("preflight" "gates" "version" "publish" "push" "ci" "tag" "release" "verify")
+# Why `commit` comes before `publish`: publishing from a dirty tree lets
+# crates.io hold bytes that no commit ever captured, which is unrecoverable if
+# the run dies on the next line. Committing first makes every published artifact
+# reproducible from pushed history.
+#
+# Publishing still precedes CI, and that has a real cost: a version can be
+# burned by a commit that CI later rejects. Local gates run first, so this needs
+# a CI-only failure (flaky runner, or something nightly-specific stable misses).
+# To never risk it, reorder to:
+#   preflight gates version commit push ci publish verify tag release
+STEPS=("preflight" "gates" "version" "commit" "publish" "push" "ci" "tag" "release" "verify")
 
 # --- layout -----------------------------------------------------------------
 STATE_DIR="deploy/.state"

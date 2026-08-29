@@ -115,23 +115,29 @@ if [ "${#INTERNAL_DEPS[@]}" -gt 0 ]; then
   done
 fi
 
-# Can the declared version still be published? A version already on crates.io
-# is burned forever, so this is a blocker rather than a note.
+# Registry reachability and version freshness.
+#
+# "the manifest version is already published" is INFORMATION, not a blocker:
+# release.sh's version step exists to pick the next number, so making this a
+# failure produced a deadlock — preflight ran as step 0, failed, and the release
+# aborted before the step that resolves it could run. Only an undecidable
+# registry query is a real blocker, because publishing a burned version is
+# unrecoverable.
 for entry in "${CRATES[@]}"; do
   name=$(crate_name_of "$entry"); ver=$(manifest_version "$(crate_path_of "$entry")")
   st=$(crate_status "$name")
   case "$st" in
     published*)
       if index_has_version "$name" "$ver"; then
-        bad "$name@$ver is ALREADY published — versions cannot be reused, bump required"
+        note "$name@$ver is already published; a bump will be proposed (latest ${st#published })"
       else
-        note "$name published (latest ${st#published }); $ver is new and publishable"
+        pass "$name: manifest $ver is new and publishable (latest online ${st#published })"
       fi ;;
     absent)
       pass "$name never published — $ver would be its first release" ;;
     *)
-      # Unreachable is not absent: do not report an all-clear on a crate we
-      # could not look up.
+      # Unreachable is not absent: never report an all-clear on a crate we could
+      # not look up.
       bad "$name: crates.io unreachable (not 404) — cannot decide publishability" ;;
   esac
 done

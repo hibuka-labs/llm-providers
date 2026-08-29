@@ -94,11 +94,24 @@ gate_action() {
   return 0
 }
 
+# The version being released. Prefer the value chosen in this process, then the
+# recorded state, then the manifest — that order keeps a rehearsal truthful, since
+# dry runs deliberately write no state and would otherwise show the *old* number
+# in later step messages.
+PROPOSED_VERSION=""
+target_version() {
+  local v
+  v="${PROPOSED_VERSION:-}"
+  [ -n "$v" ] || v=$(state_read "version")
+  [ -n "$v" ] || v=$(manifest_version "$(crate_path_of "${CRATES[0]}")")
+  printf '%s' "$v"
+}
+
 # ---------------------------------------------------------------------------
 # 0. preflight
 # ---------------------------------------------------------------------------
 step_preflight() {
-  section "0/8 preflight"
+  section "0/10 preflight"
   if ! "$LIB_DIR/preflight.sh"; then
     die "preflight failed — fix the blockers above, or run deploy/preflight.sh to see them"
   fi
@@ -110,7 +123,7 @@ step_preflight() {
 # 1. local gates
 # ---------------------------------------------------------------------------
 step_gates() {
-  section "1/8 local gates"
+  section "1/10 local gates"
   need cargo rustc
   run "rustfmt"         cargo fmt --all --check                  || return 1
   run "clippy"          cargo clippy --workspace --all-targets -- -D warnings || return 1
@@ -171,7 +184,7 @@ $d"
 }
 
 step_version() {
-  section "2/8 version"
+  section "2/10 version"
   local cur tag log published apidiff kind why conf proposed llm_src
 
   cur=$(manifest_version "$(crate_path_of "${CRATES[0]}")")
@@ -216,6 +229,7 @@ step_version() {
     info "--bump $kind -> $proposed (override in effect, LLM not consulted)"
     confirm "Publish $PROJECT_NAME v$proposed ($kind)" yes || die "aborted"
   fi
+  PROPOSED_VERSION="$proposed"
 
   gate_action "write version $proposed into the manifests" || return 0
   local entry p spec f dep
@@ -254,8 +268,8 @@ bump_from_commits() { # <log>
 # 3. publish to crates.io
 # ---------------------------------------------------------------------------
 step_publish() {
-  section "3/8 publish crates.io"
-  local ver; ver=$(state_read "version"); [ -n "$ver" ] || ver=$(manifest_version "Cargo.toml")
+  section "4/10 publish crates.io"
+  local ver; ver=$(target_version)
   info "target version: $ver"
 
   # A registry we cannot reach must stop us, not wave us through: publishing a
@@ -297,19 +311,47 @@ step_publish() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. commit + push
+# 4. commit the version bump
+# ---------------------------------------------------------------------------
+step_commit() {
+  section "3/10 commit"
+  local ver entry; ver=$(target_version)
+  if git_clean; then
+    ok "nothing to commit (version step was a rehearsal or already committed)"
+    return 0
+  fi
+  if ! gate_action "commit the version bump for v$ver"; then
+    git status --short | sed 's/^/    would commit: /'
+    return 0
+  fi
+  # Stage only what a release commit should contain. `git add -A` would sweep in
+  # anything the repo forgot to ignore, and this commit is about to be the one
+  # the published crate must reproduce.
+  local paths=""
+  for entry in "${CRATES[@]}"; do paths="$paths $(crate_path_of "$entry")"; done
+  [ -f Cargo.lock ] && paths="$paths Cargo.lock"
+  paths="$paths CHANGELOG.md"
+  # shellcheck disable=SC2086
+  run "git add" git add $paths || return 1
+  run "commit" git commit -q -m "chore(release): v$ver" || return 1
+  git_clean || { err "release commit left changes staged or untracked"; git status --short | sed 's/^/  /' >&2; return 1; }
+  state_write "release.sha" "$(git rev-parse HEAD)"
+  ok "committed $(git rev-parse --short HEAD) v$ver"
+}
+
+# ---------------------------------------------------------------------------
+# 5. push
 # ---------------------------------------------------------------------------
 step_push() {
-  section "4/8 push"
-  local ver; ver=$(state_read "version")
-  if ! git_clean; then
-    gate_action "commit version bump v$ver" || true
-    if [ "$DRY" = "1" ]; then
-      git status --short | sed 's/^/    would commit: /'
-      return 0
-    fi
-    git add -A
-    run "commit" git commit -q -m "chore(release): v$ver" || return 1
+  section "5/10 push"
+  local ver; ver=$(target_version)
+  # By now the crate may already be on crates.io. A dirty tree here means the
+  # published bytes are not in any commit, so say so loudly rather than
+  # continuing. Not applicable to a rehearsal, which commits nothing.
+  if [ -z "${DEPLOY_DRY:-}" ] && ! git_clean; then
+    err "tree is dirty at push time — the published version would not match any commit"
+    git status --short | sed 's/^/      /' >&2
+    die "push manually after inspecting, then resume with --from ci"
   fi
   gate_action "push v$ver to origin/$DEFAULT_BRANCH" || return 0
   run "push" git push origin "$DEFAULT_BRANCH" || return 1
@@ -325,7 +367,7 @@ step_push() {
 # 5. CI
 # ---------------------------------------------------------------------------
 step_ci() {
-  section "5/8 CI"
+  section "6/10 CI"
   if ! gh_ready; then warn "gh unavailable; cannot verify CI"; return 0; fi
   gate_action "wait for CI" || return 0
   local sha; sha=$(git rev-parse HEAD)
@@ -371,8 +413,8 @@ ci_explain() { # <run_id>
 # 6/7. tag + release
 # ---------------------------------------------------------------------------
 step_tag() {
-  section "6/8 tag"
-  local ver; ver=$(state_read "version"); [ -n "$ver" ] || ver=$(manifest_version Cargo.toml)
+  section "7/10 tag"
+  local ver; ver=$(target_version)
   local tag="v$ver"
   if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     ok "tag $tag already exists locally; skipping"
@@ -388,7 +430,7 @@ $(head_subject)" || return 1
 }
 
 step_release() {
-  section "7/8 GitHub release"
+  section "8/10 GitHub release"
   local ver tag notes
   tag=$(state_read "tag"); ver="${tag#v}"
   if ! gh_ready; then warn "gh unavailable; skipping release"; return 0; fi
@@ -424,7 +466,7 @@ release_notes() { # <ver> <tag>
 # 8. end-to-end verification against what the public actually sees
 # ---------------------------------------------------------------------------
 step_verify() {
-  section "8/8 verify install from crates.io"
+  section "9/10 verify install from crates.io"
   "$LIB_DIR/verify.sh" || return 1
 }
 

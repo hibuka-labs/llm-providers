@@ -37,25 +37,40 @@ conservative, because publishing to crates.io cannot be undone.
 --help                show this list
 ```
 
-Steps: `preflight gates version publish push ci tag release verify`.
+Steps, in order:
+
+```
+0 preflight  1 gates  2 version  3 commit  4 publish
+5 push       6 ci     7 tag      8 release  9 verify
+```
 
 Rehearsals record no progress, so a dry run never makes a later real run skip
-steps.
+steps. `target_version()` prefers the value chosen in the current process, so a
+rehearsal still prints the new number in steps 3–9 instead of the old one.
 
 ## Why publish happens before push
 
-Your requested order is the default: gates → publish → push → CI → tag → release.
+The default order is gates → version → commit → publish → push → CI → tag → release.
 
-The trade-off, stated plainly: if CI rejects the commit *after* crates.io
-accepted the version, that version number is burned. A yank does not free it, so
-the only recovery is releasing a new number. Local gates run first, so this
-needs a CI-only failure — a flaky runner, or something nightly-specific that
-stable does not catch.
+Two things were deliberately fixed along the way:
+
+* **`commit` runs before `publish`.** Publishing from a dirty tree would let
+  crates.io hold bytes that exist in no commit — unrecoverable if the run dies on
+  the next line. Committing first makes every published artifact reproducible
+  from pushed history.
+* **The push step refuses a dirty tree for real runs**, since by then the crate
+  may already be published and a mismatch would be silently permanent.
+
+The remaining trade-off, stated plainly: if CI rejects the commit *after*
+crates.io accepted the version, that version number is burned. A yank does not
+free it, so the only recovery is releasing a new number. Local gates run first,
+so this needs a CI-only failure — a flaky runner, or something nightly-specific
+that stable does not catch.
 
 To invert the trade-off, edit `STEPS` in `config.sh` to
 
 ```bash
-STEPS=("preflight" "gates" "version" "push" "ci" "publish" "verify" "tag" "release")
+STEPS=("preflight" "gates" "version" "commit" "push" "ci" "publish" "verify" "tag" "release")
 ```
 
 Then a rejected commit never reaches the registry, at the cost of CI needing to
@@ -72,7 +87,9 @@ ask, no matter what else is assumed:
 | `publish` | `cargo publish <crate>@<ver>` | irreversible, one prompt per crate |
 | `release` | approve the drafted notes | public artifact |
 
-Everything before them (fmt, clippy, tests, docs, fuzz build) is read-only.
+Reversible steps (fmt, clippy, tests, docs, fuzz build, local commit) never
+block on a prompt, and `DEPLOY_ASSUME_YES=1` skips prompts for those while still
+confirming the three above.
 
 Once the flow is proven, switch to `CONFIRM_MODE="auto"` plus `--yes --auto`,
 and the prompts disappear. Keep `--yes`: it is the difference between "I read
