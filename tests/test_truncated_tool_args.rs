@@ -5,9 +5,8 @@
 //! JSON. If this invalid JSON is stored in the session history and sent back to
 //! the API on the next turn, the API returns 400 "Invalid request parameters".
 //!
-//! Bug report: session log 20260826_8b229428 — MiMo 400 on turn 8 because
-//! turn 7's write_file had truncated arguments (19KB file content, ~5000 tokens,
-//! but max_tokens was only 4096).
+//! Reproduced against a hosted endpoint: a 19KB `write_file` argument was cut at
+//! 4096 max output tokens, and the invalid JSON then poisoned the next turn.
 
 use llm_trait::{CallMode, ChatMessage, ChatRequest, RawAdapter, ToolCallMessage};
 use llm_unified::OpenAiProtocol;
@@ -29,15 +28,20 @@ fn max_tokens_default_is_16384() {
 #[test]
 fn max_tokens_with_profile_uses_profile_value() {
     // When a profile specifies max_output_tokens, the protocol should use it.
+    // The MiMo OpenAI endpoint is documented at 128K output, and its profile is
+    // resolved by brand prefix (`mimo-`) rather than an exact model key.
     use llm_unified::model_registry::ModelRegistry;
     let registry = ModelRegistry::builtin();
-    let profile = registry.lookup(
-        "mimo-v2.5-pro",
-        Some("https://token-plan-cn.xiaomimimo.com/v1"),
-        None,
-    );
-    // MiMo profile has max_output_tokens: 8192
-    assert_eq!(profile.capabilities.max_output_tokens, Some(8192));
+    let profile = registry.lookup("mimo-v2.5-pro", Some("https://api.example.com/v1"), None);
+    assert_eq!(profile.provider_name, "mimo");
+    assert_eq!(profile.capabilities.max_output_tokens, Some(128_000));
+
+    // The profile value reaches the wire request when injected.
+    let protocol = OpenAiProtocol::new("sk-test", "mimo-v2.5-pro", Some("http://localhost"))
+        .with_model_profile(profile);
+    let request = ChatRequest::new(vec![ChatMessage::user("hi")]);
+    let raw = protocol.build_request(&request, CallMode::Once).unwrap();
+    assert_eq!(raw.body["max_tokens"].as_u64().unwrap(), 128_000);
 }
 
 // ── Scenario 2: truncated tool args pass through without validation ──────────
@@ -64,7 +68,11 @@ fn request_with_truncated_tool_call() -> ChatRequest {
          so its arguments may be truncated. Re-issue the tool call with complete arguments.",
     );
 
-    ChatRequest::new(vec![assistant_msg, tool_error_msg, ChatMessage::user("continue")])
+    ChatRequest::new(vec![
+        assistant_msg,
+        tool_error_msg,
+        ChatMessage::user("continue"),
+    ])
 }
 
 #[test]
@@ -122,19 +130,35 @@ fn truncation_guard_only_checks_length_finish_reason() {
 
     // "length" → Length (guard fires)
     let fr_length = FinishReason::from_str("length");
-    assert_eq!(fr_length, FinishReason::Length, "length should map to Length");
+    assert_eq!(
+        fr_length,
+        FinishReason::Length,
+        "length should map to Length"
+    );
 
     // "max_tokens" → Length (Anthropic style, guard fires)
     let fr_max = FinishReason::from_str("max_tokens");
-    assert_eq!(fr_max, FinishReason::Length, "max_tokens should map to Length");
+    assert_eq!(
+        fr_max,
+        FinishReason::Length,
+        "max_tokens should map to Length"
+    );
 
     // "stop" → Stop (guard does NOT fire — this is the bug when API lies)
     let fr_stop = FinishReason::from_str("stop");
-    assert_eq!(fr_stop, FinishReason::Stop, "stop is not Length — guard bypassed");
+    assert_eq!(
+        fr_stop,
+        FinishReason::Stop,
+        "stop is not Length — guard bypassed"
+    );
 
     // "tool_calls" → ToolCalls (guard does NOT fire)
     let fr_tc = FinishReason::from_str("tool_calls");
-    assert_eq!(fr_tc, FinishReason::ToolCalls, "tool_calls is not Length — guard bypassed");
+    assert_eq!(
+        fr_tc,
+        FinishReason::ToolCalls,
+        "tool_calls is not Length — guard bypassed"
+    );
 }
 
 // ── Scenario 4: realistic write_file content size ────────────────────────────
@@ -146,7 +170,10 @@ fn realistic_write_file_exceeds_4096_tokens() {
     //
     // Token estimation: ~4 chars per token for code (conservative).
     let file_content = "x".repeat(18951); // matches real failure size
-    let args = format!(r#"{{"path": "src/ui/markdown.rs", "content": "{}"}}"#, file_content);
+    let args = format!(
+        r#"{{"path": "src/ui/markdown.rs", "content": "{}"}}"#,
+        file_content
+    );
     let estimated_tokens = args.len() / 4; // ~4737 tokens
     let max_tokens = 16384u32;
 
