@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a protocol, parsing, or streaming bug
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Please redact API keys and any confidential content.
+  - type: input
+    id: version
+    attributes:
+      label: Crate version
+      description: Output of `cargo tree -p llm-unified` (or the git commit you built from)
+      placeholder: "llm-unified 0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Model name as passed to `LlmConfig.model`
+      placeholder: "gpt-4o-mini"
+    validations:
+      required: true
+  - type: input
+    id: base_url
+    attributes:
+      label: Base URL
+      description: Endpoint being called (redact private hosts if needed)
+      placeholder: "https://api.openai.com/v1"
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol
+      options: [inferred (left unset), openai, anthropic, other]
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Error text, wrong chunks, missing usage, panics, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Smallest code snippet or `llm-cli` invocation that shows it
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: raw
+    attributes:
+      label: Raw response / stream frames
+      description: |
+        Paste the provider's raw body or SSE frames if you have them (`RUST_LOG=debug`,
+        curl, or `ChatResponse::raw`). Truncate long content but keep the structure.
+      render: json
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Tool calls used? reasoning config? proxy in front of the model?

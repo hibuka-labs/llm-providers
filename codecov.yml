@@ -1,0 +1,25 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 85%
+        threshold: 2%
+    patch:
+      default:
+        # Per-diff bar: new code should be covered, but small glue diffs should
+        # not be blocked by a single uncovered line.
+        target: 80%
+        threshold: 5%
+
+ignore:
+  - "tests/**"
+  - "examples/**"
+  - "fuzz/**"
+  # Binary entry point: argument parsing + printing, exercised manually via
+  # `cargo run --bin llm-cli`. Excluded so the number reflects library logic.
+  - "src/bin/**"
+
+comment:
+  # One coverage comment per PR, updated in place.
+  behavior: default
+  require_changes: false

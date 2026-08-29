@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an idea, or request support for a provider/protocol
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provider requests are especially welcome — tell us which endpoint and what it needs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem this solves
+      description: What are you trying to do that is awkward or impossible today?
+      placeholder: "I have to hand-roll X because the trait only offers Y."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, code sketch, or behaviour you want
+      render: rust
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of change
+      options:
+        - New model profile (existing protocol)
+        - New provider/protocol adapter
+        - Trait or type change
+        - CLI improvement
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: willing
+    attributes:
+      label: Are you willing to submit a PR?
+      options: ["Yes", "No", "Maybe with guidance"]
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

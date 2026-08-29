@@ -2,7 +2,13 @@
 name = "llm-trait"
 version = "0.1.0"
 edition = "2024"
-description = "Trait definitions and core types for LLM providers"
+rust-version = "1.88"  # driven by reqwest 0.13 -> icu 2.3
+description = "Trait definitions and core types for a unified LLM provider layer"
+license = "MIT"
+repository = "https://github.com/hibuka-labs/llm-providers"
+readme = "../README.md"
+keywords = ["llm", "openai", "anthropic", "traits", "ai"]
+categories = ["api-bindings", "asynchronous"]
 
 [dependencies]
 async-trait = "0.1"
