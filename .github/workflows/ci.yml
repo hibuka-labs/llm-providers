@@ -76,7 +76,7 @@ jobs:
       - name: Upload to Codecov
         # Only when the repo is wired up to Codecov; CI stays green otherwise.
         if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
