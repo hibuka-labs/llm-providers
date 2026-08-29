@@ -16,9 +16,11 @@ name: fuzz
 #   schedule (weekly)   900s            60                blocking
 #   workflow_dispatch   your choice     60                blocking
 #
-# Locally libFuzzer sustains ~63k execs/s, so 60s ≈ 3.8M executions and
-# 900s ≈ 57M per target. If 25 minutes is too slow for PRs, lower
-# `total_seconds` — the build, not the fuzzing, is most of the floor.
+# Locally libFuzzer sustains ~63k execs/s, so 60s ≈ 3.8M executions.
+# Fixed overhead is the cargo-fuzz source install (~3 min, cached) plus the
+# ASan build of the crate (~4-5 min cold), which is why 25 minutes is the PR
+# timeout. If that gets tight, lower total_seconds — past a few minutes of
+# actual fuzzing, lowering it barely helps, because the build dominates.
 #
 # PR runs report fuzzing as an advisory warning: a nightly-toolchain or
 # runner-image hiccup should not block a merge. Everything that is *not* fuzzing
@@ -55,7 +57,7 @@ jobs:
   fuzz:
     name: Fuzz (${{ github.event_name }})
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 25 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 60 }}
     env:
       # dispatch input > weekly schedule > PR default
       TOTAL_SECONDS: ${{ github.event_name == 'schedule' && '900' || github.event.inputs.total_seconds || '60' }}
@@ -70,14 +72,34 @@ jobs:
           # workspace-root target/ dir (target/<triple>/release/), not fuzz/.
           key: fuzz
 
-      # NOTE the explicit `with: tool`. `@cargo-fuzz` looks like it should work
-      # (the cargo-llvm-cov tag does) but cargo-fuzz is a *branch*, not a tool
-      # tag, so the action gets an empty tool input, installs nothing, and exits
-      # 0 — the failure only surfaces later as `no such command: fuzz`.
-      - name: Install cargo-fuzz
-        uses: taiki-e/install-action@v2
+      - name: Cache cargo-fuzz binary
+        id: cargo-fuzz-cache
+        uses: actions/cache@v4
         with:
-          tool: cargo-fuzz
+          path: ~/.cargo/bin/cargo-fuzz
+          # runner.arch is required, not cosmetic: this binary embeds a host
+          # triple, so a cache restored across architectures would reproduce
+          # the exact bug the step above avoids. Bump the suffix to force a
+          # rebuild of the tool itself.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-fuzz-0.13.2-v1
+
+      # Install from source, NOT via taiki-e/install-action. Its Linux release
+      # is musl-only, and cargo-fuzz hardcodes its default target from
+      # current_platform::CURRENT_PLATFORM — baked in when cargo-fuzz itself is
+      # compiled. A musl-built binary therefore defaults to
+      # x86_64-unknown-linux-musl, and ASan refuses to build against musl's
+      # crt-static:
+      #   error: sanitizer is incompatible with statically linked libc
+      # Compiling here makes the default the runner's own gnu triple. Passing
+      # `--target` explicitly is not a workaround: `cargo fuzz run --target X`
+      # mis-parses its positional corpus argument in 0.13.2.
+      #
+      # Also note `@cargo-fuzz` as a ref is a branch, not a tool tag (unlike
+      # @cargo-llvm-cov), so the action receives an empty `tool`, installs
+      # nothing, and exits 0 — surfacing later as `no such command: fuzz`.
+      - name: Install cargo-fuzz
+        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --locked
 
       # Fail loudly here rather than letting a missing binary masquerade as a
       # fuzzing result.
