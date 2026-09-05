@@ -8,7 +8,7 @@
 | < 0.1   | ❌ |
 
 This project is pre-1.0. Security fixes land on the latest release and, when
-practical, on `master`.
+practical, on `main`.
 
 ## Why This Matters Here
 

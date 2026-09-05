@@ -110,7 +110,7 @@ than accepting the drop — fuzz corpora under `fuzz/` are good sources of input
 1. **Start with an issue.** For bugs, include the model, base URL (redacted),
    and protocol. For features and new providers, open an issue before writing
    code so the design can be discussed.
-2. **Create a branch** from `master`: `git checkout -b fix/anthropic-usage-merge`.
+2. **Create a branch** from `main`: `git checkout -b fix/anthropic-usage-merge`.
 3. **Keep the layering honest.** `llm-trait` must stay free of heavy
    dependencies and must not depend on `llm-unified`. Protocol quirks belong in
    `src/protocol/*`; per-model facts belong in `src/model_registry/*`.
@@ -125,7 +125,7 @@ than accepting the drop — fuzz corpora under `fuzz/` are good sources of input
    cargo doc --no-deps   # no broken intra-doc links
    ```
 
-6. **Push and open a pull request** against `master`. Fill in the template;
+6. **Push and open a pull request** against `main`. Fill in the template;
    explain *why*, not just *what*.
 
 ## Commit Style
