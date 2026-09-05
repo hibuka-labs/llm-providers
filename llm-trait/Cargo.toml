@@ -1,6 +1,6 @@
 [package]
 name = "llm-trait"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.88"  # driven by reqwest 0.13 -> icu 2.3
 description = "Trait definitions and core types for a unified LLM provider layer"

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-06
+
+### Changed
+- `rand` dependency bumped from 0.9 to 0.10 (internal jitter use only; no
+  public API surface changes).
+- CI: `actions/checkout` 5 → 7, `actions/upload-artifact` 5 → 7,
+  `codecov/codecov-action` 5 → 7, `actions/cache` 4 → 6.
+- Default branch migrated from `master` to `main`; CI and contributor docs
+  updated accordingly.
+
+## [0.1.1] - 2026-08-29
+
 ### Added
 - `LlmError::status()` — inspect the HTTP status code carried by an `LlmApi` error.
 - `GenericProvider::with_http_client()` — inject a custom `HttpClient` to stub
