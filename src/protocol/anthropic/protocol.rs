@@ -106,8 +106,11 @@ impl AnthropicProtocol {
                 .unwrap_or(self.max_tokens)
         };
 
+        // Use request.model if specified, otherwise use default model
+        let effective_model = request.model.as_deref().unwrap_or(&self.model);
+
         let mut body = serde_json::json!({
-            "model": self.model,
+            "model": effective_model,
             "max_tokens": effective_max_tokens,
             "messages": messages,
             "stream": stream,

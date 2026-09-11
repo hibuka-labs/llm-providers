@@ -45,6 +45,16 @@ pub struct ChatRequest {
 
     /// Response format configuration
     pub response_format: Option<ResponseFormat>,
+
+    /// Optional model override.
+    ///
+    /// - `None`: Use the provider's default model
+    /// - `Some(name)`: Use the specified model for this request
+    ///
+    /// This enables multi-model routing: the application can set different
+    /// models for different scenes (e.g., "lite" for sub-agents, "advanced"
+    /// for architecture decisions) without creating multiple providers.
+    pub model: Option<String>,
 }
 
 impl ChatRequest {
@@ -55,7 +65,14 @@ impl ChatRequest {
             tools: Vec::new(),
             reasoning: None,
             response_format: None,
+            model: None,
         }
+    }
+
+    /// Set model override.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 
     /// Add tools.
@@ -125,6 +142,13 @@ mod tests {
         assert!(req.tools.is_empty());
         assert!(req.reasoning.is_none());
         assert!(req.response_format.is_none());
+        assert!(req.model.is_none());
+    }
+
+    #[test]
+    fn chat_request_with_model() {
+        let req = ChatRequest::new(vec![ChatMessage::user("hello")]).with_model("mimo-v2.5-pro");
+        assert_eq!(req.model.as_deref(), Some("mimo-v2.5-pro"));
     }
 
     #[test]

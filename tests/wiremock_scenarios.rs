@@ -67,6 +67,7 @@ async fn mimo_no_reasoning_effort() {
     let request = ChatRequest {
         messages: vec![ChatMessage::user("hello")],
         tools: Vec::new(),
+        model: None,
         reasoning: Some(ReasoningConfig {
             effort: Some(ReasoningEffort::Medium),
             ..Default::default()
@@ -107,6 +108,7 @@ async fn deepseek_sends_reasoning_effort() {
     let request = ChatRequest {
         messages: vec![ChatMessage::user("hello")],
         tools: Vec::new(),
+        model: None,
         reasoning: Some(ReasoningConfig {
             effort: Some(ReasoningEffort::High),
             ..Default::default()
@@ -146,6 +148,7 @@ async fn unknown_model_no_reasoning() {
     let request = ChatRequest {
         messages: vec![ChatMessage::user("hello")],
         tools: Vec::new(),
+        model: None,
         reasoning: Some(ReasoningConfig {
             effort: Some(ReasoningEffort::Medium),
             ..Default::default()
@@ -280,6 +283,7 @@ async fn anthropic_non_stream_thinking_block() {
     let request = ChatRequest {
         messages: vec![ChatMessage::user("think about this")],
         tools: Vec::new(),
+        model: None,
         reasoning: Some(ReasoningConfig {
             budget_tokens: Some(4096),
             ..Default::default()

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-11
+
+### Added
+- **`ChatRequest.model`** field + `with_model()` builder method (llm-trait):
+  optional per-request model override enabling multi-model routing (e.g.
+  "lite" for sub-agents, "advanced" for architecture decisions) without
+  creating multiple providers.
+- OpenAI and Anthropic protocols honour `request.model` when set, falling
+  back to the provider's default model otherwise (llm-unified).
+
 ## [0.1.2] - 2026-09-06
 
 ### Changed
