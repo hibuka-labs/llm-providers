@@ -203,6 +203,74 @@ async fn stream_collects_text_from_sse_events() {
 }
 
 #[tokio::test]
+async fn stream_tolerates_processing_keepalive() {
+    // 对称性防御测试：上游（如 MiMo）以 data 字段夹带注释式心跳
+    // `data: : PROCESSING`。它不是合法 JSON，解析器应跳过，
+    // 而不是报 "Failed to parse SSE event" 整流失败。
+    let server = MockServer::start().await;
+
+    let mut sse_body = String::new();
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-keepalive",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"role": "assistant", "content": "Hello "},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    // 事故根源：上游在两个正式 chunk 之间插入心跳
+    sse_body.push_str("data: : PROCESSING\n\n");
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-keepalive",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "world!"},
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_data(
+        &serde_json::json!({
+            "id": "chatcmpl-keepalive",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string(),
+    ));
+    sse_body.push_str("data: [DONE]\n\n");
+
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(sse_body)
+                .insert_header("content-type", "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri());
+    let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
+    let stream = provider.stream(request).await.unwrap();
+    // 心跳在 Stop 之前，collect_text 会经过它：若被当致命错误，此处即 Err
+    let text = stream.collect_text().await.unwrap();
+
+    assert_eq!(text, "Hello world!");
+}
+
+#[tokio::test]
 async fn stream_extracts_usage_from_final_chunk() {
     let server = MockServer::start().await;
 

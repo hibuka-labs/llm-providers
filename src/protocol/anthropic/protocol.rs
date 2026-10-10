@@ -619,12 +619,15 @@ impl RawAdapter for AnthropicProtocol {
 
         let chunk_stream = event_stream.flat_map(|event| match event {
             Ok(es_event) => {
-                // OpenAI 风格的流终止符（部分中继/代理会在 message_stop 后补发），
-                // 不是合法 JSON，跳过即可；Anthropic 的终止信号由 message_stop 提供
-                if es_event.data.trim() == "[DONE]" {
+                let data = es_event.data.trim();
+                // 非 JSON 哨兵/keep-alive，不是事件载荷，跳过即可：
+                // - `[DONE]`：OpenAI 风格流终止符（部分中继/代理会在 message_stop 后补发）
+                // - `: ...`：上游注释式心跳（如 MiMo 发 `data: : PROCESSING`）
+                // Anthropic 的终止信号由 message_stop 提供
+                if data == "[DONE]" || data.starts_with(':') {
                     return futures_util::stream::iter(vec![]);
                 }
-                match serde_json::from_str::<MessagesStreamEvent>(&es_event.data) {
+                match serde_json::from_str::<MessagesStreamEvent>(data) {
                     Ok(stream_event) => match Self::convert_event(stream_event) {
                         Ok(chunks) => futures_util::stream::iter(
                             chunks.into_iter().map(Ok).collect::<Vec<_>>(),

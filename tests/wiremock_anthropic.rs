@@ -253,6 +253,134 @@ async fn stream_tolerates_trailing_openai_done_marker() {
     assert_eq!(text, "Hello world!");
 }
 
+/// 构造一条完整的合法 Anthropic SSE 流（供 keep-alive / 坏 JSON 测试复用）。
+fn anthropic_sse_happy_body() -> String {
+    let mut sse_body = String::new();
+    sse_body.push_str(&sse_event(
+        "message_start",
+        &serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_keepalive",
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": "test-model",
+                "usage": {"input_tokens": 5, "output_tokens": 0}
+            }
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event(
+        "content_block_delta",
+        &serde_json::json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Hello world!"}
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event(
+        "message_delta",
+        &serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+            "usage": {"output_tokens": 2}
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event("message_stop", r#"{"type": "message_stop"}"#));
+    sse_body
+}
+
+/// 排空流并返回 (拼接文本, 错误列表)——collect_text 遇 Stop 即断，
+/// 看不到 Stop 之后（或中途）的错误 chunk，需要手动排空。
+async fn drain_stream(stream: &mut llm_trait::ChatStream) -> (String, Vec<String>) {
+    let mut text = String::new();
+    let mut errors = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(StreamChunk::Text(t)) => text.push_str(&t),
+            Ok(_) => {}
+            Err(e) => errors.push(e.to_string()),
+        }
+    }
+    (text, errors)
+}
+
+#[tokio::test]
+async fn stream_tolerates_processing_keepalive() {
+    // 防御测试：MiMo 等上游会以 data 字段夹带注释式心跳 `data: : PROCESSING`。
+    // 它不是合法 JSON，解析器应跳过它，而不是报 "Failed to parse SSE event"
+    // 整流失败、白烧 turn_retry 整轮重连（实测 1000/2000/4000ms 三次全废）。
+    let server = MockServer::start().await;
+
+    let mut sse_body = anthropic_sse_happy_body();
+    // 事故根源：上游在 message_start 之后、正式 delta 之前插入心跳
+    sse_body.insert_str(
+        sse_body.find("event: content_block_delta").unwrap(),
+        "data: : PROCESSING\n\n",
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(sse_body)
+                .insert_header("content-type", "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri());
+    let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
+    let mut stream = provider.stream(request).await.unwrap();
+
+    let (text, errors) = drain_stream(&mut stream).await;
+    assert!(
+        errors.is_empty(),
+        "keep-alive `: PROCESSING` must be tolerated, got errors: {errors:?}"
+    );
+    assert_eq!(text, "Hello world!");
+}
+
+#[tokio::test]
+async fn stream_malformed_json_still_fatal() {
+    // 不变式：只有已知哨兵（[DONE] / `: ...`）可跳过；
+    // 真正的坏 JSON 必须继续致命，否则会静默丢事件。
+    let server = MockServer::start().await;
+
+    let mut sse_body = anthropic_sse_happy_body();
+    sse_body.insert_str(
+        sse_body.find("event: content_block_delta").unwrap(),
+        "data: {broken json\n\n",
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(sse_body)
+                .insert_header("content-type", "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri());
+    let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
+    let mut stream = provider.stream(request).await.unwrap();
+
+    let (_text, errors) = drain_stream(&mut stream).await;
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("Failed to parse SSE event")),
+        "genuinely malformed JSON must stay fatal, got errors: {errors:?}"
+    );
+}
+
 #[tokio::test]
 async fn stream_usage_accumulates_correctly() {
     // With the fix: prompt_tokens from message_start is preserved
