@@ -6,7 +6,7 @@
 //! - Error handling (401/429/500) returns correct LlmError
 //! - Retry logic (429 auto-retry, 401 no retry)
 
-use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider};
+use llm_trait::{ChatMessage, ChatRequest, LlmError, LlmProvider, StreamChunk};
 use llm_unified::{AnthropicProtocol, GenericProvider};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -176,6 +176,84 @@ async fn stream_collects_text_from_sse_events() {
 }
 
 #[tokio::test]
+async fn stream_tolerates_trailing_openai_done_marker() {
+    // 防御测试：上游（如 llm-proxy 中继）可能在合法的 message_stop 之后
+    // 补发 OpenAI 风格的 `data: [DONE]` 终止符。[DONE] 不是合法 JSON，
+    // 解析器应跳过它，而不是报 "Failed to parse SSE event" 整流失败。
+    let server = MockServer::start().await;
+
+    let mut sse_body = String::new();
+    sse_body.push_str(&sse_event(
+        "message_start",
+        &serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_done",
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": "test-model",
+                "usage": {"input_tokens": 5, "output_tokens": 0}
+            }
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event(
+        "content_block_delta",
+        &serde_json::json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Hello world!"}
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event(
+        "message_delta",
+        &serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+            "usage": {"output_tokens": 2}
+        })
+        .to_string(),
+    ));
+    sse_body.push_str(&sse_event("message_stop", r#"{"type": "message_stop"}"#));
+    // 事故根源：代理补发的 OpenAI 风格终止符
+    sse_body.push_str("data: [DONE]\n\n");
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(sse_body)
+                .insert_header("content-type", "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri());
+    let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
+    let mut stream = provider.stream(request).await.unwrap();
+
+    // 手动排空整个流（collect_text 遇 Stop 即断，看不到 Stop 之后的错误 chunk）
+    let mut text = String::new();
+    let mut errors = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(StreamChunk::Text(t)) => text.push_str(&t),
+            Ok(_) => {}
+            Err(e) => errors.push(e.to_string()),
+        }
+    }
+
+    assert!(
+        errors.is_empty(),
+        "trailing [DONE] must be tolerated, got errors: {errors:?}"
+    );
+    assert_eq!(text, "Hello world!");
+}
+
+#[tokio::test]
 async fn stream_usage_accumulates_correctly() {
     // With the fix: prompt_tokens from message_start is preserved
     // even when message_delta only has completion_tokens
@@ -287,6 +365,8 @@ async fn chat_429_retries_then_succeeds() {
     let config = llm_unified::generic::ProviderConfig {
         max_retries: 3,
         retry_delay: std::time::Duration::from_millis(1),
+        // 测试里压缩限流退避，验证的是「会重试」语义而非真实等待时长
+        rate_limit_retry_delay: std::time::Duration::from_millis(1),
         ..Default::default()
     };
     let provider = GenericProvider::with_config(Box::new(protocol), config);

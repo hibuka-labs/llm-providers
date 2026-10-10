@@ -308,6 +308,8 @@ async fn chat_429_retries_then_succeeds() {
     let config = llm_unified::generic::ProviderConfig {
         max_retries: 3,
         retry_delay: std::time::Duration::from_millis(1),
+        // 测试里压缩限流退避，验证的是「会重试」语义而非真实等待时长
+        rate_limit_retry_delay: std::time::Duration::from_millis(1),
         ..Default::default()
     };
     let provider = GenericProvider::with_config(Box::new(protocol), config);

@@ -27,6 +27,10 @@ pub struct ProviderConfig {
     pub request_timeout: Duration,
     pub max_retries: u32,
     pub retry_delay: Duration,
+    /// Backoff base for 429 rate-limit retries, which need far more patience
+    /// than transient 5xx: the upstream window is usually tens of seconds, so
+    /// sub-second retries just keep hitting the same wall and burn the budget.
+    pub rate_limit_retry_delay: Duration,
     /// Optional external HTTP client (for connection pool sharing)
     pub client: Option<reqwest::Client>,
 }
@@ -38,6 +42,7 @@ impl Default for ProviderConfig {
             request_timeout: Duration::from_secs(120),
             max_retries: 3,
             retry_delay: Duration::from_secs(1),
+            rate_limit_retry_delay: Duration::from_secs(30),
             client: None,
         }
     }
@@ -112,7 +117,7 @@ impl GenericProvider {
 
         for attempt in 0..=self.config.max_retries {
             if attempt > 0 {
-                let delay = self.calculate_backoff(attempt);
+                let delay = self.backoff_for_last_failure(attempt, &last_err);
                 tokio::time::sleep(delay).await;
             }
 
@@ -166,7 +171,7 @@ impl GenericProvider {
 
         for attempt in 0..=self.config.max_retries {
             if attempt > 0 {
-                let delay = self.calculate_backoff(attempt);
+                let delay = self.backoff_for_last_failure(attempt, &last_err);
                 tokio::time::sleep(delay).await;
             }
 
@@ -209,10 +214,29 @@ impl GenericProvider {
     }
 
     fn calculate_backoff(&self, attempt: u32) -> Duration {
-        let base = self.config.retry_delay.as_millis() as u64;
+        self.backoff_with(self.config.retry_delay, 30_000, attempt)
+    }
+
+    fn calculate_rate_limit_backoff(&self, attempt: u32) -> Duration {
+        self.backoff_with(self.config.rate_limit_retry_delay, 60_000, attempt)
+    }
+
+    /// Pick backoff based on the previous failure: 429 rate limits get the
+    /// patient schedule, everything else keeps the regular one.
+    fn backoff_for_last_failure(&self, attempt: u32, last_err: &Option<LlmError>) -> Duration {
+        let rate_limited = last_err.as_ref().and_then(|e| e.status()) == Some(429);
+        if rate_limited {
+            self.calculate_rate_limit_backoff(attempt)
+        } else {
+            self.calculate_backoff(attempt)
+        }
+    }
+
+    fn backoff_with(&self, base: Duration, cap_ms: u64, attempt: u32) -> Duration {
+        let base = base.as_millis() as u64;
         let exponential = base * 2u64.pow(attempt.saturating_sub(1));
         let jitter = rand::random::<u64>() % 100;
-        Duration::from_millis((exponential + jitter).min(30_000))
+        Duration::from_millis((exponential + jitter).min(cap_ms))
     }
 }
 
@@ -491,6 +515,73 @@ mod tests {
 
         assert_eq!(err.status(), Some(401));
         assert_eq!(client.calls(), 1, "401 must not be retried");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retries_429_with_patient_backoff() {
+        // 限流重试要有耐心：429 的退避应在 30–60s 量级，而不是普通 retry_delay 的秒级。
+        // 用暂停的虚拟时钟测量默认配置下的退避总时长，不实际等待。
+        let client = Arc::new(MockHttpClient::new(vec![
+            llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
+            llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
+            llm_trait::HttpResponse::from_text(200, "{}".to_string()),
+        ]));
+        let provider = GenericProvider::with_http_client(
+            Box::new(MockAdapter),
+            client.clone(),
+            ProviderConfig::default(),
+        );
+
+        let start = tokio::time::Instant::now();
+        let response = provider
+            .chat(ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(response.content, "mock response");
+        assert_eq!(client.calls(), 3, "two 429s then success");
+        assert!(
+            elapsed >= Duration::from_secs(60),
+            "429 retries must wait patiently (total backoff >= 60s), waited only {elapsed:?}"
+        );
+        assert!(
+            elapsed <= Duration::from_secs(300),
+            "429 backoff must stay bounded, waited {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_retries_429_with_patient_backoff() {
+        // 流式入口（phimint 事故路径）同样要有耐心，不能几秒内放弃
+        let client = Arc::new(MockHttpClient::new(vec![
+            llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
+            llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
+            llm_trait::HttpResponse::from_text(200, "".to_string()),
+        ]));
+        let provider = GenericProvider::with_http_client(
+            Box::new(MockAdapter),
+            client.clone(),
+            ProviderConfig::default(),
+        );
+
+        let start = tokio::time::Instant::now();
+        let stream = provider
+            .stream(ChatRequest::new(vec![ChatMessage::user("hi")]))
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        drop(stream);
+
+        assert_eq!(client.calls(), 3, "two 429s then success");
+        assert!(
+            elapsed >= Duration::from_secs(60),
+            "stream 429 retries must wait patiently (total backoff >= 60s), waited only {elapsed:?}"
+        );
+        assert!(
+            elapsed <= Duration::from_secs(300),
+            "stream 429 backoff must stay bounded, waited {elapsed:?}"
+        );
     }
 
     // Note: generic_provider_stream test removed because execute_stream now does
