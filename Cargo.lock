@@ -926,15 +926,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "llm-unified"
+name = "llm-trait"
 version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28f415524d0efc33e8d687420d5d8a341d520cf9bb52c9d55e546aacdbe40f6d"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "llm-unified"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "clap",
  "eventsource-stream",
  "futures-core",
  "futures-util",
- "llm-trait",
+ "llm-trait 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "proptest",
  "rand 0.10.2",
  "reqwest",
@@ -950,7 +967,7 @@ name = "llm-unified-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "llm-trait",
+ "llm-trait 0.1.3",
  "llm-unified",
  "serde_json",
 ]
