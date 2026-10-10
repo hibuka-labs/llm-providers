@@ -80,7 +80,10 @@ Note the asymmetry between the two streaming methods:
   rather than just parsing.
 
 If you are writing an adapter: put your SSE parsing in `parse_sse_stream`. That
-is the path your code will run on.
+is the path your code will run on. The bundled parsers are deliberately tolerant
+of relay quirks: comment-style keep-alive sentinels (`data: : PROCESSING`-style
+heartbeats) and trailing `data: [DONE]` terminators are skipped, while genuinely
+malformed JSON stays a fatal error — events are never silently dropped.
 
 ### `HttpClient` — where tests cut in
 
@@ -205,12 +208,16 @@ which is why `LlmError` lives in `llm-trait` and depends on nothing project-spec
 ## Retries and timeouts
 
 Defaults come from `ProviderConfig`: 15s connect timeout, 120s read timeout,
-3 retries, 1s base delay. Retry policy:
+3 retries, 1s base delay (`retry_delay`). Retry policy:
 
 - Retried: HTTP 429 and 5xx, on the **initial** exchange only.
 - Not retried: 4xx other than 429 (401/403/404 are configuration errors —
   retrying wastes time), and any failure after the stream has started.
 - Backoff: `retry_delay * 2^(attempt-1)` plus ≤100ms jitter, capped at 30s.
+- HTTP 429 uses a separate, more patient backoff —
+  `rate_limit_retry_delay * 2^(attempt-1)` (default 30s base, capped at 60s) —
+  because hammering a rate-limited endpoint with the short 5xx schedule just
+  extends the penalty window.
 
 Once `stream()` returns a `ChatStream`, delivery is the caller's problem: an
 in-flight stream that dies surfaces as `StreamChunk::Error` or

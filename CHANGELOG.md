@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-08
+
+### Added
+- **`ProviderConfig.rate_limit_retry_delay`** (llm-unified): separate, longer
+  backoff for HTTP 429 rate limiting — 30s base, exponential, capped at 60s.
+  5xx/transport errors keep the existing `retry_delay` policy (1s base, capped
+  at 30s).
+
+### Fixed
+- **Anthropic SSE parser tolerates OpenAI-style `data: [DONE]` terminators**
+  (llm-unified): some relays append `[DONE]` after `message_stop`; previously the
+  whole stream failed with "Failed to parse SSE event", dropping an already
+  completed reply.
+- **SSE parsers skip comment-style keep-alive sentinels** (llm-unified,
+  anthropic/openai symmetric): providers like MiMo embed heartbeats such as
+  `data: : PROCESSING`, which were treated as fatal stream errors and burned
+  full retry rounds on every heartbeat. Genuinely malformed JSON remains fatal —
+  events are never silently dropped.
+
 ## [0.1.3] - 2026-09-11
 
 ### Added
