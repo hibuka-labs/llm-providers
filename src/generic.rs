@@ -519,8 +519,9 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn retries_429_with_patient_backoff() {
-        // 限流重试要有耐心：429 的退避应在 30–60s 量级，而不是普通 retry_delay 的秒级。
-        // 用暂停的虚拟时钟测量默认配置下的退避总时长，不实际等待。
+        // Rate-limit retries must be patient: 429 backoff should be on the 30–60s
+        // scale, not the seconds-level ordinary retry_delay. Measure the total backoff
+        // under the default config with a paused virtual clock, without real waiting.
         let client = Arc::new(MockHttpClient::new(vec![
             llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
             llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
@@ -553,7 +554,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn stream_retries_429_with_patient_backoff() {
-        // 流式入口（phimint 事故路径）同样要有耐心，不能几秒内放弃
+        // The streaming entry point (the phimint incident path) must be patient too —
+        // no giving up within seconds
         let client = Arc::new(MockHttpClient::new(vec![
             llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),
             llm_trait::HttpResponse::from_text(429, "rate limited".to_string()),

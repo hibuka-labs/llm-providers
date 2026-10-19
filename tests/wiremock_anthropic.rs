@@ -177,9 +177,10 @@ async fn stream_collects_text_from_sse_events() {
 
 #[tokio::test]
 async fn stream_tolerates_trailing_openai_done_marker() {
-    // 防御测试：上游（如 llm-proxy 中继）可能在合法的 message_stop 之后
-    // 补发 OpenAI 风格的 `data: [DONE]` 终止符。[DONE] 不是合法 JSON，
-    // 解析器应跳过它，而不是报 "Failed to parse SSE event" 整流失败。
+    // Defensive test: upstreams (e.g. the llm-proxy relay) may send an extra
+    // OpenAI-style `data: [DONE]` terminator after a legitimate message_stop.
+    // [DONE] is not valid JSON; the parser must skip it instead of failing the
+    // whole stream with "Failed to parse SSE event".
     let server = MockServer::start().await;
 
     let mut sse_body = String::new();
@@ -217,7 +218,7 @@ async fn stream_tolerates_trailing_openai_done_marker() {
         .to_string(),
     ));
     sse_body.push_str(&sse_event("message_stop", r#"{"type": "message_stop"}"#));
-    // 事故根源：代理补发的 OpenAI 风格终止符
+    // Root cause of the incident: the proxy's extra OpenAI-style terminator
     sse_body.push_str("data: [DONE]\n\n");
 
     Mock::given(method("POST"))
@@ -235,7 +236,8 @@ async fn stream_tolerates_trailing_openai_done_marker() {
     let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
     let mut stream = provider.stream(request).await.unwrap();
 
-    // 手动排空整个流（collect_text 遇 Stop 即断，看不到 Stop 之后的错误 chunk）
+    // Drain the whole stream manually (collect_text stops at Stop and never sees
+    // error chunks after it)
     let mut text = String::new();
     let mut errors = Vec::new();
     while let Some(chunk) = stream.next().await {
@@ -253,7 +255,8 @@ async fn stream_tolerates_trailing_openai_done_marker() {
     assert_eq!(text, "Hello world!");
 }
 
-/// 构造一条完整的合法 Anthropic SSE 流（供 keep-alive / 坏 JSON 测试复用）。
+/// Build a complete, legitimate Anthropic SSE stream (shared by the keep-alive /
+/// bad-JSON tests).
 fn anthropic_sse_happy_body() -> String {
     let mut sse_body = String::new();
     sse_body.push_str(&sse_event(
@@ -293,8 +296,8 @@ fn anthropic_sse_happy_body() -> String {
     sse_body
 }
 
-/// 排空流并返回 (拼接文本, 错误列表)——collect_text 遇 Stop 即断，
-/// 看不到 Stop 之后（或中途）的错误 chunk，需要手动排空。
+/// Drain the stream and return (concatenated text, error list) — collect_text stops
+/// at Stop and never sees error chunks after it (or mid-stream), so drain manually.
 async fn drain_stream(stream: &mut llm_trait::ChatStream) -> (String, Vec<String>) {
     let mut text = String::new();
     let mut errors = Vec::new();
@@ -310,13 +313,16 @@ async fn drain_stream(stream: &mut llm_trait::ChatStream) -> (String, Vec<String
 
 #[tokio::test]
 async fn stream_tolerates_processing_keepalive() {
-    // 防御测试：MiMo 等上游会以 data 字段夹带注释式心跳 `data: : PROCESSING`。
-    // 它不是合法 JSON，解析器应跳过它，而不是报 "Failed to parse SSE event"
-    // 整流失败、白烧 turn_retry 整轮重连（实测 1000/2000/4000ms 三次全废）。
+    // Defensive test: upstreams like MiMo smuggle comment-style heartbeats in the
+    // data field, e.g. `data: : PROCESSING`. It is not valid JSON; the parser must
+    // skip it instead of failing the whole stream with "Failed to parse SSE event"
+    // and wasting a full turn_retry reconnect (measured: all three of
+    // 1000/2000/4000ms burned for nothing).
     let server = MockServer::start().await;
 
     let mut sse_body = anthropic_sse_happy_body();
-    // 事故根源：上游在 message_start 之后、正式 delta 之前插入心跳
+    // Root cause of the incident: the upstream inserted a heartbeat after
+    // message_start but before the real delta
     sse_body.insert_str(
         sse_body.find("event: content_block_delta").unwrap(),
         "data: : PROCESSING\n\n",
@@ -347,8 +353,8 @@ async fn stream_tolerates_processing_keepalive() {
 
 #[tokio::test]
 async fn stream_malformed_json_still_fatal() {
-    // 不变式：只有已知哨兵（[DONE] / `: ...`）可跳过；
-    // 真正的坏 JSON 必须继续致命，否则会静默丢事件。
+    // Invariant: only known sentinels ([DONE] / `: ...`) may be skipped; genuinely
+    // bad JSON must stay fatal, or events would be dropped silently.
     let server = MockServer::start().await;
 
     let mut sse_body = anthropic_sse_happy_body();
@@ -493,7 +499,8 @@ async fn chat_429_retries_then_succeeds() {
     let config = llm_unified::generic::ProviderConfig {
         max_retries: 3,
         retry_delay: std::time::Duration::from_millis(1),
-        // 测试里压缩限流退避，验证的是「会重试」语义而非真实等待时长
+        // The test compresses the rate-limit backoff: it verifies the "will retry"
+        // semantics, not the real wait duration
         rate_limit_retry_delay: std::time::Duration::from_millis(1),
         ..Default::default()
     };

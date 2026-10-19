@@ -639,7 +639,8 @@ impl RawAdapter for OpenAiProtocol {
                     })]);
                 }
 
-                // 上游注释式心跳（如 MiMo 发 `data: : PROCESSING`）不是事件载荷，跳过
+                // Upstream comment-style heartbeats (e.g. MiMo sends `data: : PROCESSING`)
+                // are not event payloads — skip them
                 if data.starts_with(':') {
                     return futures_util::stream::iter(vec![]);
                 }

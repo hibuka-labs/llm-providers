@@ -204,9 +204,10 @@ async fn stream_collects_text_from_sse_events() {
 
 #[tokio::test]
 async fn stream_tolerates_processing_keepalive() {
-    // 对称性防御测试：上游（如 MiMo）以 data 字段夹带注释式心跳
-    // `data: : PROCESSING`。它不是合法 JSON，解析器应跳过，
-    // 而不是报 "Failed to parse SSE event" 整流失败。
+    // Symmetry defensive test: upstreams (e.g. MiMo) smuggle comment-style
+    // heartbeats in the data field as `data: : PROCESSING`. It is not valid
+    // JSON; the parser must skip it instead of failing the whole stream with
+    // "Failed to parse SSE event".
     let server = MockServer::start().await;
 
     let mut sse_body = String::new();
@@ -222,7 +223,8 @@ async fn stream_tolerates_processing_keepalive() {
         })
         .to_string(),
     ));
-    // 事故根源：上游在两个正式 chunk 之间插入心跳
+    // Root cause of the incident: the upstream inserted a heartbeat between two
+    // real chunks
     sse_body.push_str("data: : PROCESSING\n\n");
     sse_body.push_str(&sse_data(
         &serde_json::json!({
@@ -264,7 +266,8 @@ async fn stream_tolerates_processing_keepalive() {
     let provider = make_provider(&server.uri());
     let request = ChatRequest::new(vec![ChatMessage::user("greet")]);
     let stream = provider.stream(request).await.unwrap();
-    // 心跳在 Stop 之前，collect_text 会经过它：若被当致命错误，此处即 Err
+    // The heartbeat precedes Stop, so collect_text passes through it: if it were
+    // treated as a fatal error, this would be Err
     let text = stream.collect_text().await.unwrap();
 
     assert_eq!(text, "Hello world!");
@@ -376,7 +379,8 @@ async fn chat_429_retries_then_succeeds() {
     let config = llm_unified::generic::ProviderConfig {
         max_retries: 3,
         retry_delay: std::time::Duration::from_millis(1),
-        // 测试里压缩限流退避，验证的是「会重试」语义而非真实等待时长
+        // The test compresses the rate-limit backoff: it verifies the "will retry"
+        // semantics, not the real wait duration
         rate_limit_retry_delay: std::time::Duration::from_millis(1),
         ..Default::default()
     };

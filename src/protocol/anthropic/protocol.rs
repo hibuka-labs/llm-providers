@@ -620,10 +620,11 @@ impl RawAdapter for AnthropicProtocol {
         let chunk_stream = event_stream.flat_map(|event| match event {
             Ok(es_event) => {
                 let data = es_event.data.trim();
-                // 非 JSON 哨兵/keep-alive，不是事件载荷，跳过即可：
-                // - `[DONE]`：OpenAI 风格流终止符（部分中继/代理会在 message_stop 后补发）
-                // - `: ...`：上游注释式心跳（如 MiMo 发 `data: : PROCESSING`）
-                // Anthropic 的终止信号由 message_stop 提供
+                // Non-JSON sentinels / keep-alives are not event payloads — just skip:
+                // - `[DONE]`: OpenAI-style stream terminator (some relays/proxies send it
+                //   again after message_stop)
+                // - `: ...`: upstream comment-style heartbeat (e.g. MiMo sends `data: : PROCESSING`)
+                // Anthropic's end-of-stream signal comes from message_stop
                 if data == "[DONE]" || data.starts_with(':') {
                     return futures_util::stream::iter(vec![]);
                 }
