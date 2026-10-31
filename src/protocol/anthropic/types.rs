@@ -73,6 +73,21 @@ pub enum StopReason {
     Refusal,
 }
 
+/// Lenient stop-reason deserializer: MiniMax sends `""` (empty string) in
+/// some paths; any unrecognised value degrades to `None` rather than
+/// failing the whole SSE event. Recognised variants parse exactly as before.
+fn lenient_stop_reason<'de, D>(deserializer: D) -> Result<Option<StopReason>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = serde_json::Value::deserialize(deserializer)?;
+    match val {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(s) if s.is_empty() => Ok(None),
+        other => Ok(serde_json::from_value(other).ok()),
+    }
+}
+
 // ── MessageDelta / MessageDeltaUsage (used in MessageDelta event) ──
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +103,7 @@ pub struct MessageDeltaUsage {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDelta {
+    #[serde(default, deserialize_with = "lenient_stop_reason")]
     pub stop_reason: Option<StopReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_sequence: Option<String>,
@@ -227,6 +243,42 @@ mod tests {
             let back: StopReason = serde_json::from_value(val).unwrap();
             assert_eq!(back, reason, "deserialize {reason:?}");
         }
+    }
+
+    /// MiniMax sends `""` in `stop_reason` on some paths — the parser must
+    /// not reject the whole event over one unknown value.
+    #[test]
+    fn empty_stop_reason_degrades_to_none() {
+        let delta: MessageDelta = serde_json::from_value(json!({
+            "stop_reason": "",
+            "stop_sequence": null
+        }))
+        .unwrap();
+        assert_eq!(delta.stop_reason, None);
+    }
+
+    /// Unknown stop_reason values (future variants, provider quirks) also
+    /// degrade to `None` rather than erroring.
+    #[test]
+    fn unknown_stop_reason_degrades_to_none() {
+        let delta: MessageDelta = serde_json::from_value(json!({
+            "stop_reason": "some_new_reason",
+            "stop_sequence": null
+        }))
+        .unwrap();
+        assert_eq!(delta.stop_reason, None);
+    }
+
+    /// Recognised variants still parse correctly — no regression from the
+    /// lenient wrapper.
+    #[test]
+    fn known_stop_reason_still_parses() {
+        let delta: MessageDelta = serde_json::from_value(json!({
+            "stop_reason": "tool_use",
+            "stop_sequence": null
+        }))
+        .unwrap();
+        assert_eq!(delta.stop_reason, Some(StopReason::ToolUse));
     }
 
     #[test]

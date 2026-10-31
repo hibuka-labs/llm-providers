@@ -268,12 +268,26 @@ impl OpenAiProtocol {
                 ChatMessage::Tool {
                     tool_call_id,
                     content,
+                    images,
                     ..
                 } => {
+                    // A `role:"tool"` message is string-only here: the shape
+                    // cannot carry a picture. Say so rather than drop it —
+                    // a model that knows it missed a screenshot can ask for
+                    // it again; one that never heard of it is silently blind.
+                    let body = if images.is_empty() {
+                        content.clone()
+                    } else {
+                        format!(
+                            "{content}\n[note: this result also carried {} image(s), \
+                             which this provider's tool-result shape cannot deliver]",
+                            images.len()
+                        )
+                    };
                     result.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": tool_call_id,
-                        "content": content
+                        "content": body
                     }));
                 }
                 ChatMessage::Custom { .. } => {
@@ -1443,6 +1457,48 @@ mod tests {
         let out = OpenAiProtocol::convert_messages(&msgs);
         let content = out[0]["content"].as_array().unwrap();
         assert_eq!(content[1]["image_url"]["detail"], "high");
+    }
+
+    /// A `role:"tool"` message is string-only here, so a picture cannot ride
+    /// it — the model is told it missed one rather than being left silent.
+    #[test]
+    fn a_tool_result_reports_the_pictures_it_cannot_deliver() {
+        use llm_trait::ImageAttachment;
+        let msgs = vec![ChatMessage::tool_with_images(
+            "tc1",
+            "image: the whole desktop",
+            vec![
+                ImageAttachment::Base64 {
+                    data: "abc123".into(),
+                    media_type: Some("image/png".into()),
+                    detail: None,
+                },
+                ImageAttachment::Base64 {
+                    data: "abc123".into(),
+                    media_type: Some("image/png".into()),
+                    detail: None,
+                },
+            ],
+        )];
+        let out = OpenAiProtocol::convert_messages(&msgs);
+        assert_eq!(out[0]["role"], "tool");
+        let body = out[0]["content"].as_str().expect("string content");
+        assert!(
+            body.starts_with("image: the whole desktop"),
+            "the words still lead: {body}"
+        );
+        assert!(
+            body.contains("2 image(s)"),
+            "the drop is named, never silent: {body}"
+        );
+    }
+
+    /// Without pictures the wire is unchanged — no note on an ordinary result.
+    #[test]
+    fn a_word_only_tool_result_carries_no_note() {
+        let msgs = vec![ChatMessage::tool("tc1", "done")];
+        let out = OpenAiProtocol::convert_messages(&msgs);
+        assert_eq!(out[0]["content"], "done");
     }
 
     // ── proptest: convert_messages ──

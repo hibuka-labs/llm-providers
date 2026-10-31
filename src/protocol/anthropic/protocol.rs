@@ -30,6 +30,26 @@ pub struct AnthropicProtocol {
     profile: Option<ModelProfile>,
 }
 
+/// One attachment → one Anthropic `image` content block. The same shape
+/// wherever a picture rides a message: a user turn or a tool_result.
+fn image_block(img: &ImageAttachment) -> Value {
+    match img {
+        ImageAttachment::Url { url, .. } => serde_json::json!({
+            "type": "image",
+            "source": { "type": "url", "url": url }
+        }),
+        ImageAttachment::Base64 {
+            data, media_type, ..
+        } => {
+            let media_type = media_type.as_deref().unwrap_or("image/jpeg");
+            serde_json::json!({
+                "type": "image",
+                "source": { "type": "base64", "media_type": media_type, "data": data }
+            })
+        }
+    }
+}
+
 impl AnthropicProtocol {
     pub fn new(api_key: &str, model: &str, base_url: Option<&str>) -> Self {
         Self {
@@ -182,30 +202,7 @@ impl AnthropicProtocol {
                     })];
 
                     for img in images {
-                        match img {
-                            ImageAttachment::Url { url, .. } => {
-                                blocks.push(serde_json::json!({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "url",
-                                        "url": url
-                                    }
-                                }));
-                            }
-                            ImageAttachment::Base64 {
-                                data, media_type, ..
-                            } => {
-                                let media_type = media_type.as_deref().unwrap_or("image/jpeg");
-                                blocks.push(serde_json::json!({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": data
-                                    }
-                                }));
-                            }
-                        }
+                        blocks.push(image_block(img));
                     }
 
                     result.push(serde_json::json!({
@@ -261,14 +258,30 @@ impl AnthropicProtocol {
                 ChatMessage::Tool {
                     tool_call_id,
                     content,
+                    images,
                     ..
                 } => {
+                    // A tool_result's content may be a block list, so the
+                    // pictures a tool handed back travel beside its words —
+                    // the model looks at them in the same turn as the result.
+                    let body = if images.is_empty() {
+                        serde_json::Value::String(content.clone())
+                    } else {
+                        let mut blocks = vec![serde_json::json!({
+                            "type": "text",
+                            "text": content
+                        })];
+                        for img in images {
+                            blocks.push(image_block(img));
+                        }
+                        serde_json::Value::Array(blocks)
+                    };
                     result.push(serde_json::json!({
                         "role": "user",
                         "content": [{
                             "type": "tool_result",
                             "tool_use_id": tool_call_id,
-                            "content": content
+                            "content": body
                         }]
                     }));
                 }
@@ -802,6 +815,70 @@ mod tests {
         assert!(sys.is_none());
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["role"], "user");
+    }
+
+    /// A tool result that carried no picture keeps the bare string form —
+    /// the wire stays exactly as it was before the image face existed.
+    #[test]
+    fn a_word_only_tool_result_stays_a_plain_string() {
+        let msgs = vec![ChatMessage::tool("tc1", "done")];
+        let (_, out) = AnthropicProtocol::convert_messages(&msgs);
+        assert_eq!(out.len(), 1);
+        let result = &out[0]["content"][0];
+        assert_eq!(result["type"], "tool_result");
+        assert_eq!(result["tool_use_id"], "tc1");
+        assert_eq!(result["content"], "done");
+    }
+
+    /// A tool result that handed the model pictures puts them beside the
+    /// words: a block list of text + image, inside the same tool_result.
+    #[test]
+    fn a_tool_result_carries_its_pictures_beside_the_words() {
+        let msgs = vec![ChatMessage::tool_with_images(
+            "tc1",
+            "image: the whole desktop",
+            vec![ImageAttachment::Base64 {
+                data: "aGVsbG8=".to_string(),
+                media_type: Some("image/png".to_string()),
+                detail: None,
+            }],
+        )];
+        let (_, out) = AnthropicProtocol::convert_messages(&msgs);
+        let result = &out[0]["content"][0];
+        assert_eq!(result["type"], "tool_result");
+        let blocks = result["content"].as_array().expect("block list");
+        assert_eq!(blocks.len(), 2, "one text block + one image block");
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[0]["text"], "image: the whole desktop");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["source"]["type"], "base64");
+        assert_eq!(blocks[1]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[1]["source"]["data"], "aGVsbG8=");
+    }
+
+    /// Two pictures keep their order and both arrive — a screenshot the
+    /// model must compare against the one before it.
+    #[test]
+    fn every_picture_a_tool_returned_arrives_in_order() {
+        let attach = |d: &str| ImageAttachment::Base64 {
+            data: d.to_string(),
+            media_type: Some("image/png".to_string()),
+            detail: None,
+        };
+        let msgs = vec![ChatMessage::tool_with_images(
+            "tc1",
+            "two shots",
+            vec![attach("Zmlyc3Q="), attach("c2Vjb25k")],
+        )];
+        let (_, out) = AnthropicProtocol::convert_messages(&msgs);
+        let blocks = out[0]["content"][0]["content"]
+            .as_array()
+            .expect("block list");
+        let data: Vec<&str> = blocks
+            .iter()
+            .filter_map(|b| b["source"]["data"].as_str())
+            .collect();
+        assert_eq!(data, ["Zmlyc3Q=", "c2Vjb25k"]);
     }
 
     #[test]

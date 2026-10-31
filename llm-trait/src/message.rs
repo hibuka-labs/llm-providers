@@ -66,10 +66,19 @@ pub enum ChatMessage {
         thinking_signature: Option<String>,
         tool_calls: Option<Vec<ToolCallMessage>>,
     },
+    /// A tool's result, paired with the assistant's `tool_calls` entry.
+    ///
+    /// `content` is the textual face; `images` carries pictures the tool's
+    /// output wants the model to *look at* (a screenshot, a rendered
+    /// diagram). A provider whose tool-result shape can carry images sends
+    /// them beside the text; one that cannot says so in `content` rather
+    /// than dropping the picture silently.
     Tool {
         tool_call_id: String,
         name: Option<String>,
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageAttachment>,
     },
     /// Application-defined message type for extensibility.
     ///
@@ -174,6 +183,21 @@ impl ChatMessage {
             tool_call_id: tool_call_id.into(),
             name: None,
             content: content.into(),
+            images: Vec::new(),
+        }
+    }
+
+    /// A tool result that also hands the model pictures to look at.
+    pub fn tool_with_images(
+        tool_call_id: impl Into<String>,
+        content: impl Into<String>,
+        images: Vec<ImageAttachment>,
+    ) -> Self {
+        Self::Tool {
+            tool_call_id: tool_call_id.into(),
+            name: None,
+            content: content.into(),
+            images,
         }
     }
 
@@ -186,6 +210,7 @@ impl ChatMessage {
             tool_call_id: tool_call_id.into(),
             name: Some(name.into()),
             content: content.into(),
+            images: Vec::new(),
         }
     }
 }
@@ -215,6 +240,65 @@ mod tests {
     fn chat_message_system() {
         let msg = ChatMessage::system("sys");
         assert!(!msg.is_ephemeral());
+    }
+
+    /// Pictures ride the tool result through a persisted transcript too —
+    /// a session resumed later still hands the model what it was shown.
+    #[test]
+    fn a_tool_result_round_trips_its_pictures() {
+        let msg = ChatMessage::tool_with_images(
+            "tc1",
+            "image: the whole desktop",
+            vec![ImageAttachment::Base64 {
+                data: "aGVsbG8=".to_string(),
+                media_type: Some("image/png".to_string()),
+                detail: None,
+            }],
+        );
+        let wire = serde_json::to_string(&msg).unwrap();
+        let back: ChatMessage = serde_json::from_str(&wire).unwrap();
+        match back {
+            ChatMessage::Tool {
+                tool_call_id,
+                content,
+                images,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "tc1");
+                assert_eq!(content, "image: the whole desktop");
+                assert_eq!(images.len(), 1);
+            }
+            other => panic!("expected a tool result, got {other:?}"),
+        }
+    }
+
+    /// Transcripts written before the image face existed have no `images`
+    /// key at all. They must keep loading — a resume must never fail on
+    /// history the product itself wrote.
+    #[test]
+    fn a_tool_result_written_before_images_still_loads() {
+        let old = r#"{"Tool":{"tool_call_id":"tc1","name":null,"content":"done"}}"#;
+        let msg: ChatMessage = serde_json::from_str(old).unwrap();
+        match msg {
+            ChatMessage::Tool {
+                content, images, ..
+            } => {
+                assert_eq!(content, "done");
+                assert!(images.is_empty());
+            }
+            other => panic!("expected a tool result, got {other:?}"),
+        }
+    }
+
+    /// An empty image list is not written at all: a word-only tool result
+    /// serializes byte-for-byte as it did before this field existed.
+    #[test]
+    fn a_word_only_tool_result_serializes_without_an_images_key() {
+        let wire = serde_json::to_string(&ChatMessage::tool("tc1", "done")).unwrap();
+        assert!(
+            !wire.contains("images"),
+            "no empty field on the wire: {wire}"
+        );
     }
 
     #[test]
@@ -262,10 +346,15 @@ mod tests {
                 tool_call_id,
                 name,
                 content,
+                images,
             } => {
                 assert_eq!(tool_call_id, "id1");
                 assert!(name.is_none());
                 assert_eq!(content, "result");
+                assert!(
+                    images.is_empty(),
+                    "the plain constructor carries no pictures"
+                );
             }
             _ => panic!("Expected Tool variant"),
         }
@@ -279,10 +368,15 @@ mod tests {
                 tool_call_id,
                 name,
                 content,
+                images,
             } => {
                 assert_eq!(tool_call_id, "id1");
                 assert_eq!(name.as_deref(), Some("echo"));
                 assert_eq!(content, "result");
+                assert!(
+                    images.is_empty(),
+                    "the plain constructor carries no pictures"
+                );
             }
             _ => panic!("Expected Tool variant"),
         }

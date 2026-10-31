@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-31
+
+### Added
+- **`ChatMessage::Tool.images`** (llm-trait 0.1.4): a tool result can now carry
+  pictures the model is meant to *look at* — a screenshot, a rendered diagram —
+  beside its textual face. The field rides the persisted transcript too, so a
+  session resumed later still hands the model what it was shown.
+  `ChatMessage::tool_with_images()` is the constructor; the field is
+  `#[serde(default)]`, so transcripts written before it still load.
+- **Provider-side picture delivery** (llm-unified): a provider whose tool-result
+  shape can carry images sends them; one that cannot says so in the content
+  rather than dropping the picture silently.
+
+### Fixed
+- **Lenient `stop_reason` parsing** (llm-unified): MiniMax sends `""` on some
+  paths and other relays send values this build does not know yet. Both degrade
+  to `None` instead of failing the whole SSE event.
+
 ## [0.1.4] - 2026-10-11
 
 ### Added
