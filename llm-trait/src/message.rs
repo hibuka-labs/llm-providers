@@ -37,6 +37,12 @@ pub enum ImageDetail {
     Auto,
 }
 
+/// `skip_serializing_if` helper for `bool` flags: a message that is not
+/// synthetic serializes exactly as it did before the flag existed.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// A chat message in a conversation.
 ///
 /// Supports system, user, assistant, tool, and custom message types.
@@ -56,6 +62,14 @@ pub enum ChatMessage {
         /// Ephemeral messages are cleaned up after each turn and skipped during persistence.
         #[serde(default, skip_serializing)]
         ephemeral: bool,
+        /// Machine-composed input on the user role (tool-failure notices,
+        /// background-task wakes, the window seed): the model sees it like
+        /// any user message, but it is never the user's own words. Context
+        /// rotation skips synthetic messages when carrying the task trail
+        /// into a fresh window. Unlike `ephemeral`, this flag survives
+        /// persistence, so a resumed session keeps the distinction.
+        #[serde(default, skip_serializing_if = "is_false")]
+        synthetic: bool,
     },
     Assistant {
         content: Option<String>,
@@ -111,6 +125,7 @@ impl ChatMessage {
             content: content.into(),
             images: Vec::new(),
             ephemeral: false,
+            synthetic: false,
         }
     }
 
@@ -120,6 +135,21 @@ impl ChatMessage {
             content: content.into(),
             images: Vec::new(),
             ephemeral: true,
+            synthetic: false,
+        }
+    }
+
+    /// Create a synthetic user message: machine-composed input on the user
+    /// role (a notice, a wake, a seed) that must never stand in for the
+    /// user's own words — context rotation skips it when collecting the task
+    /// trail. The flag is persisted, so a resumed session keeps the
+    /// distinction.
+    pub fn user_synthetic(content: impl Into<String>) -> Self {
+        Self::User {
+            content: content.into(),
+            images: Vec::new(),
+            ephemeral: false,
+            synthetic: true,
         }
     }
 
@@ -128,6 +158,7 @@ impl ChatMessage {
             content: content.into(),
             images,
             ephemeral: false,
+            synthetic: false,
         }
     }
 
@@ -136,6 +167,15 @@ impl ChatMessage {
         match self {
             Self::System { ephemeral, .. } => *ephemeral,
             Self::User { ephemeral, .. } => *ephemeral,
+            _ => false,
+        }
+    }
+
+    /// Whether this is machine-composed input on the user role (never the
+    /// user's own words).
+    pub fn is_synthetic(&self) -> bool {
+        match self {
+            Self::User { synthetic, .. } => *synthetic,
             _ => false,
         }
     }
@@ -227,13 +267,49 @@ mod tests {
                 content,
                 images,
                 ephemeral,
+                synthetic,
             } => {
                 assert_eq!(content, "hello");
                 assert!(images.is_empty());
                 assert!(!ephemeral);
+                assert!(!synthetic);
             }
             _ => panic!("Expected User variant"),
         }
+    }
+
+    #[test]
+    fn chat_message_user_synthetic() {
+        let msg = ChatMessage::user_synthetic("Background tasks finished");
+        assert!(msg.is_synthetic());
+        assert!(!msg.is_ephemeral());
+        // A plain user message is the user's own words.
+        assert!(!ChatMessage::user("hello").is_synthetic());
+    }
+
+    /// The synthetic flag survives persistence — a resumed session must keep
+    /// the distinction between the user's words and machine notices.
+    #[test]
+    fn a_synthetic_user_message_round_trips_its_flag() {
+        let wire =
+            serde_json::to_string(&ChatMessage::user_synthetic("Tool calls failed")).unwrap();
+        assert!(wire.contains("synthetic"), "flag must persist: {wire}");
+        let back: ChatMessage = serde_json::from_str(&wire).unwrap();
+        assert!(back.is_synthetic());
+    }
+
+    /// An all-real transcript serializes exactly as it did before the flag
+    /// existed, and history written before it still loads as real.
+    #[test]
+    fn a_real_user_message_serializes_without_a_synthetic_key() {
+        let wire = serde_json::to_string(&ChatMessage::user("hello")).unwrap();
+        assert!(
+            !wire.contains("synthetic"),
+            "no empty flag on the wire: {wire}"
+        );
+        let old = r#"{"User":{"content":"hello","images":[]}}"#;
+        let back: ChatMessage = serde_json::from_str(old).unwrap();
+        assert!(!back.is_synthetic());
     }
 
     #[test]
