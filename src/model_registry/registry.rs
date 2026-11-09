@@ -89,6 +89,41 @@ impl ModelRegistry {
             .or_else(|| self.infer_protocol_from_url(model, base_url))
             .unwrap_or(Protocol::OpenAi);
 
+        // 2-3. The registry's knowledge
+        if let Some(profile) = self.match_known(model, protocol) {
+            return profile;
+        }
+
+        // 4. Default profile for the determined protocol
+        tracing::debug!(
+            model,
+            protocol = ?protocol,
+            "registry: using default fallback profile"
+        );
+        self.default_profile(protocol)
+    }
+
+    /// Like [`lookup`] without the fallback step: `Some` only for a model the
+    /// registry actually knows (exact `model@protocol` or brand
+    /// `brand@protocol`), `None` when [`lookup`] would have to make do with
+    /// the default profile. The default is a wire fallback, never knowledge —
+    /// callers that must not fabricate capability facts (a model picker's
+    /// "unknown" bits) ask here.
+    pub fn lookup_known(
+        &self,
+        model: &str,
+        base_url: Option<&str>,
+        explicit_protocol: Option<Protocol>,
+    ) -> Option<ModelProfile> {
+        let protocol = explicit_protocol
+            .or_else(|| self.infer_protocol_from_url(model, base_url))
+            .unwrap_or(Protocol::OpenAi);
+        self.match_known(model, protocol)
+    }
+
+    /// The knowledge steps of the fallback chain: 2. exact "model@protocol",
+    /// 3. brand default "brand@protocol". `None` = never heard of it.
+    fn match_known(&self, model: &str, protocol: Protocol) -> Option<ModelProfile> {
         // 2. Exact match "model@protocol"
         let exact_key = format!("{}@{}", model, protocol.as_str());
         if let Some(profile) = self.profiles.get(exact_key.as_str()) {
@@ -98,7 +133,7 @@ impl ModelRegistry {
                 matched = %exact_key,
                 "registry: exact match"
             );
-            return profile.clone();
+            return Some(profile.clone());
         }
 
         // 3. Brand default "brand@protocol"
@@ -112,17 +147,10 @@ impl ModelRegistry {
                     matched = %brand_key,
                     "registry: brand match"
                 );
-                return profile.clone();
+                return Some(profile.clone());
             }
         }
-
-        // 4. Default profile for the determined protocol
-        tracing::debug!(
-            model,
-            protocol = ?protocol,
-            "registry: using default fallback profile"
-        );
-        self.default_profile(protocol)
+        None
     }
 
     /// Infer brand from model name using brand_prefixes.
@@ -296,6 +324,43 @@ mod tests {
             profile.capabilities.max_output_tokens,
             Some(16_384),
             "default fallback should have max_output_tokens"
+        );
+    }
+
+    /// protects: registry knowledge (exact or brand match) is distinguishable
+    /// from a model only covered by the wire-default fallback — `lookup`
+    /// answers for everything, `lookup_known` only for models the registry
+    /// has heard of. fails_when: `lookup_known` answers `Some` for an unknown
+    /// model (fabricated capability facts) or `None` for a brand match. It
+    /// makes no claim about what callers do with `None`.
+    #[test]
+    fn lookup_known_only_answers_for_models_the_registry_knows() {
+        let registry = ModelRegistry::builtin();
+        // Exact match "deepseek-chat@openai".
+        assert!(
+            registry
+                .lookup_known("deepseek-chat", Some("https://api.deepseek.com/v1"), None)
+                .is_some()
+        );
+        // Brand match: "deepseek-xxx" falls back to "deepseek@openai" — known.
+        assert!(
+            registry
+                .lookup_known("deepseek-xxx", Some("https://api.deepseek.com/v1"), None)
+                .is_some()
+        );
+        // Unknown model: lookup still answers with the default profile,
+        // lookup_known admits it does not know.
+        assert!(
+            registry
+                .lookup_known("some-unknown", Some("https://api.example.com/v1"), None)
+                .is_none()
+        );
+        assert_eq!(
+            registry
+                .lookup("some-unknown", Some("https://api.example.com/v1"), None)
+                .provider_name,
+            "openai",
+            "lookup keeps its never-fail fallback contract"
         );
     }
 

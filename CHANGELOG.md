@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
+### Added
+- **The registry admits what it does not know.** `ModelRegistry::lookup_known`
+  resolves a model id (or a known brand alias) to its profile and answers
+  `None` for anything it has never heard of — no fallback to the wire
+  default. Callers that must not invent capability facts (a model picker's
+  "can this one see images?" bits) ask here instead of `lookup`, whose
+  fallback is a wire default, never knowledge.
+
+### Changed
+- **Protocol adapters live in directories.** `protocol/anthropic` and
+  `protocol/openai` moved from single files into modules; no API change.
+
 ## [0.1.5] - 2026-10-31
 
 ### Added
