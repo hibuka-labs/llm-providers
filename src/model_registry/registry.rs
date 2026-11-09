@@ -103,9 +103,9 @@ impl ModelRegistry {
         self.default_profile(protocol)
     }
 
-    /// Like [`lookup`] without the fallback step: `Some` only for a model the
+    /// Like [`Self::lookup`] without the fallback step: `Some` only for a model the
     /// registry actually knows (exact `model@protocol` or brand
-    /// `brand@protocol`), `None` when [`lookup`] would have to make do with
+    /// `brand@protocol`), `None` when [`Self::lookup`] would have to make do with
     /// the default profile. The default is a wire fallback, never knowledge —
     /// callers that must not fabricate capability facts (a model picker's
     /// "unknown" bits) ask here.
