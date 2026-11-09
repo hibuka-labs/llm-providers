@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default. Callers that must not invent capability facts (a model picker's
   "can this one see images?" bits) ask here instead of `lookup`, whose
   fallback is a wire default, never knowledge.
+- **Machine-composed user turns are tagged as synthetic** (llm-trait 0.1.5):
+  the `User` variant carries a `synthetic` flag, so a window seed, a
+  tool-failure notice, a background wake or a max-turns nudge can never
+  masquerade as the user's own task trail. The flag is `#[serde(default)]` and
+  skipped when false — persisted rows and the wire are unchanged, so a
+  transcript written before this release still loads.
 
 ### Changed
 - **Protocol adapters live in directories.** `protocol/anthropic` and

@@ -18,9 +18,11 @@ categories = ["api-bindings", "asynchronous"]
 fuzzing = []
 
 [dependencies]
-# In-repo member: the path keeps the workspace resolvable while llm-trait
-# 0.1.4 is still unpublished (cargo strips the path on publish and keeps
-# the version requirement).
+# llm-trait ships from this same repo as its own crate and is published on
+# crates.io, so the requirement resolves from the registry like any other
+# consumer. Keep it version-only — a path here would make the local checkout a
+# second, distinct crate instance, and the two instances' message types would
+# not match each other.
 llm-trait = { version = "0.1.4" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
