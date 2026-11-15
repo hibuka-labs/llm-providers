@@ -66,6 +66,12 @@ impl OpenAiProtocol {
                 .map_err(|e| LlmError::llm(format!("Failed to serialize tools: {e}")))?;
         }
 
+        // Tool-call batching is a permission the caller either claims or does
+        // not. Unclaimed stays absent so the provider keeps its own default.
+        if let Some(allow) = request.parallel_tool_calls {
+            body["parallel_tool_calls"] = serde_json::json!(allow);
+        }
+
         // Handle reasoning: only send if profile says this model supports Effort mode
         if let Some(ref rc) = request.reasoning
             && let Some(ref profile) = self.profile

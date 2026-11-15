@@ -293,6 +293,42 @@ fn build_request_stream_includes_usage_option() {
     );
 }
 
+/// Value: protects=the model's freedom to batch independent tool calls — the
+/// cheapest lever on turn count (measured 1.41 calls/turn over 248 turns on
+/// session 20261115_2fbff82e, 59% of turns issuing one); fails_when=the claim
+/// is dropped on the way to the wire and the provider quietly serializes.
+/// why_new=ChatRequest carried no such field, so nothing could be claimed.
+/// seam=llm-trait ChatRequest -> OpenAI request body; no_claim=that the model
+/// will actually batch — this only stops the harness from forbidding it.
+#[test]
+fn build_request_carries_the_parallel_tool_calls_claim() {
+    let proto = make_protocol();
+    let req = ChatRequest::new(vec![ChatMessage::user("hello")]).with_parallel_tool_calls(true);
+    let raw = proto.build_request(&req, CallMode::Stream).unwrap();
+    assert_eq!(
+        raw.body["parallel_tool_calls"].as_bool(),
+        Some(true),
+        "an explicit claim must reach the wire verbatim: {}",
+        raw.body
+    );
+}
+
+/// Value: protects=callers that have made no claim, and providers that reject
+/// unknown fields; fails_when=the field is sent as a default and silently
+/// changes a contract nobody signed. seam=same; no_claim=that omitting it is
+/// safe for every provider — only that absence is the unclaimed default.
+#[test]
+fn build_request_omits_parallel_tool_calls_when_unclaimed() {
+    let proto = make_protocol();
+    let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
+    let raw = proto.build_request(&req, CallMode::Stream).unwrap();
+    assert!(
+        raw.body.get("parallel_tool_calls").is_none(),
+        "unclaimed means absent, not false: {}",
+        raw.body
+    );
+}
+
 // ── convert_delta ──
 
 #[test]

@@ -70,6 +70,22 @@ pub struct ChatRequest {
     /// Move `n` forward as the conversation grows (the standard shape: the
     /// breakpoint trails the newest complete turn).
     pub cache_through: Option<usize>,
+
+    /// Whether the model may issue several tool calls in one response.
+    ///
+    /// This is a *permission*, not a request for parallelism: it says the
+    /// harness can execute the calls concurrently and the caller will not be
+    /// confused by interleaved results. Each provider carries it as its
+    /// protocol allows — OpenAI sends `parallel_tool_calls`, Anthropic has no
+    /// such field and the model batches on its own, and a provider without it
+    /// ignores this. `None` makes no claim and the provider applies its own
+    /// default.
+    ///
+    /// Nothing here guarantees the model *will* batch. It only stops the
+    /// harness from forbidding it — measured on phimint session
+    /// 20261115_2fbff82e, models that may batch still averaged 1.41 calls per
+    /// turn, so the turn-count win is a bet, not a promise.
+    pub parallel_tool_calls: Option<bool>,
 }
 
 impl ChatRequest {
@@ -82,6 +98,7 @@ impl ChatRequest {
             response_format: None,
             model: None,
             cache_through: None,
+            parallel_tool_calls: None,
         }
     }
 
@@ -90,6 +107,13 @@ impl ChatRequest {
     /// for what each protocol does with it.
     pub fn with_cache_through(mut self, n: usize) -> Self {
         self.cache_through = Some(n);
+        self
+    }
+
+    /// Declare whether the model may batch tool calls in one response. See the
+    /// field docs for what each protocol does with it.
+    pub fn with_parallel_tool_calls(mut self, allow: bool) -> Self {
+        self.parallel_tool_calls = Some(allow);
         self
     }
 

@@ -74,6 +74,7 @@ async fn mimo_no_reasoning_effort() {
         }),
         response_format: None,
         cache_through: None,
+        parallel_tool_calls: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -116,6 +117,7 @@ async fn deepseek_sends_reasoning_effort() {
         }),
         response_format: None,
         cache_through: None,
+        parallel_tool_calls: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -157,6 +159,7 @@ async fn unknown_model_no_reasoning() {
         }),
         response_format: None,
         cache_through: None,
+        parallel_tool_calls: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -293,6 +296,7 @@ async fn anthropic_non_stream_thinking_block() {
         }),
         response_format: None,
         cache_through: None,
+        parallel_tool_calls: None,
     };
 
     let response = provider.chat(request).await.unwrap();

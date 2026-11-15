@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
+### Added
+- **The request says what may be cached, and the answer says what was.**
+  (llm-trait 0.2.0) `ChatRequest` gains `cache_through: Option<usize>` — the
+  breakpoint trails the newest complete turn, so the stable prefix is named
+  rather than guessed — and `UsageInfo` gains
+  `cache_read_tokens: Option<u32>`, the hit count the provider actually
+  reports. `with_cache_through(n)` sets the breakpoint; the OpenAI and
+  Anthropic protocols carry the claim and the count in their own wire shape.
+
+- **The harness may say that a model may batch its tool calls.**
+  (llm-trait 0.2.0) `ChatRequest` gains `parallel_tool_calls: Option<bool>`
+  with `with_parallel_tool_calls(allow)`. This is a *permission*, not a
+  request for parallelism: it says the harness can run the calls
+  concurrently and will not be confused by interleaved results. Each
+  provider carries it as its protocol allows — OpenAI sends
+  `parallel_tool_calls`, Anthropic has no such field and the model batches
+  on its own, and a provider without it ignores this. `None` makes no claim.
+
+### Changed
+- **Breaking (dependency):** `llm-trait` requirement bumped from 0.1.4 to
+  0.2.0, keeping the family on a single version of the trait crate. The
+  trait's public structs gained fields, so every consumer that built them
+  exhaustively must be recompiled against the new version.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
