@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "llm-unified"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"  # driven by reqwest 0.13 -> icu 2.3
 description = "Unified LLM provider layer: one trait, many backends (OpenAI, Anthropic, DeepSeek, Qwen, ...)"
@@ -19,11 +19,12 @@ fuzzing = []
 
 [dependencies]
 # llm-trait ships from this same repo as its own crate and is published on
-# crates.io, so the requirement resolves from the registry like any other
-# consumer. Keep it version-only — a path here would make the local checkout a
-# second, distinct crate instance, and the two instances' message types would
-# not match each other.
-llm-trait = { version = "0.1.4" }
+# crates.io. The committed form stays registry-only (the release script
+# strips the path before publishing); the local dev form points at the
+# member so local edits to the leaf trait crate are visible here.
+# Consumers of this repo resolve llm-trait through [patch.crates-io], so
+# both sides land on one crate instance.
+llm-trait = { version = "0.2.0", path = "llm-trait" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 eventsource-stream = "0.2"
