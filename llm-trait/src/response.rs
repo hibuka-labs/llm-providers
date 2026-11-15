@@ -506,6 +506,7 @@ mod tests {
                 completion_tokens: Some(50),
                 total_tokens: Some(150),
                 reasoning_tokens: None,
+                cache_read_tokens: None,
             })),
             Ok(StreamChunk::Stop {
                 finish_reason: Some("stop".into()),
@@ -551,6 +552,7 @@ mod tests {
                 completion_tokens: Some(0),
                 total_tokens: None,
                 reasoning_tokens: None,
+                cache_read_tokens: None,
             })),
             Ok(StreamChunk::Text("ok".into())),
             Ok(StreamChunk::Usage(UsageInfo {
@@ -558,6 +560,7 @@ mod tests {
                 completion_tokens: Some(7),
                 total_tokens: None,
                 reasoning_tokens: None,
+                cache_read_tokens: None,
             })),
             Ok(StreamChunk::Stop {
                 finish_reason: Some("end_turn".into()),

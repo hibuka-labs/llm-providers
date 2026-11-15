@@ -6,6 +6,26 @@ use super::AnthropicProtocol;
 
 /// One attachment → one Anthropic `image` content block. The same shape
 /// wherever a picture rides a message: a user turn or a tool_result.
+/// Mark a message's last content block as a cache breakpoint.
+///
+/// `cache_control: {"type": "ephemeral"}` is Anthropic's "cache the prefix up
+/// to and including this block" marker. One marker is enough: the cache covers
+/// everything before the LAST marked block, so marking the caller's
+/// `cache_through` message captures the system prompt and tool definitions too.
+fn mark_cache_break(msg: &mut Value) {
+    if let Some(obj) = msg
+        .get_mut("content")
+        .and_then(Value::as_array_mut)
+        .and_then(|b| b.last_mut())
+        .and_then(Value::as_object_mut)
+    {
+        obj.insert(
+            "cache_control".to_string(),
+            serde_json::json!({"type": "ephemeral"}),
+        );
+    }
+}
+
 fn image_block(img: &ImageAttachment) -> Value {
     match img {
         ImageAttachment::Url { url, .. } => serde_json::json!({
@@ -32,7 +52,7 @@ impl AnthropicProtocol {
         stream: bool,
     ) -> Result<Value, LlmError> {
         let (system, messages) = Self::convert_messages(&request.messages);
-        let tools = Self::convert_tools(&request.tools);
+        let mut tools = Self::convert_tools(&request.tools);
 
         tracing::debug!(
             model = %self.model,
@@ -61,6 +81,25 @@ impl AnthropicProtocol {
 
         // Use request.model if specified, otherwise use default model
         let effective_model = request.model.as_deref().unwrap_or(&self.model);
+
+        // Cache breakpoint: mark the last content block of the caller's
+        // `cache_through` message. Anthropic caches the request prefix up to
+        // the LAST marked block, so one marker covers the system prompt, the
+        // tool definitions and every message before it — the whole stable
+        // prefix the caller claimed. No messages means the prefix is the tools,
+        // and the marker goes on the last of those.
+        let mut messages = messages;
+        if let Some(through) = request.cache_through {
+            let target = through.min(messages.len().saturating_sub(1));
+            if let Some(msg) = messages.get_mut(target) {
+                mark_cache_break(msg);
+            } else if let Some(obj) = tools.last_mut().and_then(Value::as_object_mut) {
+                obj.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
+        }
 
         let mut body = serde_json::json!({
             "model": effective_model,

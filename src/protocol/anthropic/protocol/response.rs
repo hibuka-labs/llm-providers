@@ -83,6 +83,13 @@ impl AnthropicProtocol {
                     .map(|n| n as u32),
                 total_tokens: None,
                 reasoning_tokens: None,
+                // Anthropic splits the prompt into what it re-read from cache
+                // and what it actually processed. `None` when the provider
+                // never populated the counter, which is not the same as zero.
+                cache_read_tokens: u
+                    .get("cache_read_input_tokens")
+                    .and_then(|t| t.as_u64())
+                    .map(|n| n as u32),
             })
             .unwrap_or_default();
 

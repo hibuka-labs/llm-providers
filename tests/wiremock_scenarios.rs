@@ -73,6 +73,7 @@ async fn mimo_no_reasoning_effort() {
             ..Default::default()
         }),
         response_format: None,
+        cache_through: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -114,6 +115,7 @@ async fn deepseek_sends_reasoning_effort() {
             ..Default::default()
         }),
         response_format: None,
+        cache_through: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -154,6 +156,7 @@ async fn unknown_model_no_reasoning() {
             ..Default::default()
         }),
         response_format: None,
+        cache_through: None,
     };
 
     let response = provider.chat(request).await.unwrap();
@@ -289,6 +292,7 @@ async fn anthropic_non_stream_thinking_block() {
             ..Default::default()
         }),
         response_format: None,
+        cache_through: None,
     };
 
     let response = provider.chat(request).await.unwrap();

@@ -839,6 +839,70 @@ fn build_request_with_tools() {
     assert_eq!(raw.body["tool_choice"]["type"], "auto");
 }
 
+// ── build_request: cache breakpoints ──
+
+/// Value: protects=the stable prefix reaches the provider marked for caching,
+/// so system + tools + the settled turns stop being billed as fresh input;
+/// fails_when=the marker is dropped and every token is charged at the input
+/// rate. why_new=no test builds a cached request today.
+/// seam=none; no_claim=that the provider actually caches (server-side).
+#[test]
+fn build_request_marks_the_cache_through_message() {
+    let proto = make_protocol();
+    let req = ChatRequest::new(vec![
+        ChatMessage::system("stable instructions"),
+        ChatMessage::user("first"),
+        ChatMessage::assistant("answer"),
+        ChatMessage::user("second"),
+    ])
+    .with_cache_through(2);
+    let raw = proto.build_request(&req, CallMode::Once).unwrap();
+
+    let msgs = raw.body["messages"].as_array().unwrap();
+    // One marker, on the block of the message named by `cache_through`.
+    let marked: Vec<usize> = msgs
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            m["content"]
+                .as_array()
+                .and_then(|b| b.last())
+                .is_some_and(|b| b.get("cache_control").is_some())
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(marked, vec![2], "only the cache_through message is marked");
+    assert_eq!(
+        msgs[2]["content"].as_array().unwrap()[0]["cache_control"]["type"],
+        "ephemeral"
+    );
+}
+
+#[test]
+fn build_request_without_a_cache_claim_marks_nothing() {
+    let proto = make_protocol();
+    let req = ChatRequest::new(vec![ChatMessage::user("hello")]);
+    let raw = proto.build_request(&req, CallMode::Once).unwrap();
+    let body = raw.body.to_string();
+    assert!(!body.contains("cache_control"), "{body}");
+}
+
+/// `cache_through` past the end of the conversation must not panic or
+/// silently mark nothing: clamp to the newest message so a caller that
+/// tracks "through the last turn" stays correct as turns land.
+#[test]
+fn build_request_clamps_cache_through_to_the_last_message() {
+    let proto = make_protocol();
+    let req = ChatRequest::new(vec![
+        ChatMessage::user("one"),
+        ChatMessage::assistant("two"),
+    ])
+    .with_cache_through(99);
+    let raw = proto.build_request(&req, CallMode::Once).unwrap();
+    let msgs = raw.body["messages"].as_array().unwrap();
+    assert!(msgs[1]["content"].as_array().unwrap()[0]["cache_control"].is_object());
+}
+
 // ── proptest: convert_messages ──
 
 mod proptest_tests {

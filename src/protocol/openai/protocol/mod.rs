@@ -206,6 +206,11 @@ impl RawAdapter for OpenAiProtocol {
                                     .and_then(|d| d.get("reasoning_tokens"))
                                     .and_then(|t| t.as_u64())
                                     .map(|n| n as u32),
+                                cache_read_tokens: usage
+                                    .get("prompt_tokens_details")
+                                    .and_then(|d| d.get("cached_tokens"))
+                                    .and_then(|t| t.as_u64())
+                                    .map(|n| n as u32),
                             }));
                         }
 

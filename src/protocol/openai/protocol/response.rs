@@ -89,6 +89,14 @@ impl OpenAiProtocol {
                     .and_then(|d| d.get("reasoning_tokens"))
                     .and_then(|t| t.as_u64())
                     .map(|n| n as u32),
+                // OpenAI caches the prompt prefix automatically — there is no
+                // request-side marker to send — but the hit count comes back
+                // here. `None` when the provider omits the detail object.
+                cache_read_tokens: u
+                    .get("prompt_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|t| t.as_u64())
+                    .map(|n| n as u32),
             })
             .unwrap_or_default();
 

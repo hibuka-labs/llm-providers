@@ -55,6 +55,21 @@ pub struct ChatRequest {
     /// models for different scenes (e.g., "lite" for sub-agents, "advanced"
     /// for architecture decisions) without creating multiple providers.
     pub model: Option<String>,
+
+    /// Cache through message index `n` (inclusive): the system prompt, the
+    /// tool definitions and `messages[0..=n]` repeat verbatim on the next call
+    /// — a conversation appends, it does not rewrite its own prefix.
+    ///
+    /// This is a *claim about stability*, not a protocol instruction. Each
+    /// provider exploits it as its protocol allows: Anthropic marks a
+    /// `cache_control` breakpoint at the last cached block, OpenAI caches
+    /// prefixes automatically and needs no marker at all, and a provider
+    /// without caching ignores this. `None` means the caller makes no
+    /// stability claim and nothing is cached on purpose.
+    ///
+    /// Move `n` forward as the conversation grows (the standard shape: the
+    /// breakpoint trails the newest complete turn).
+    pub cache_through: Option<usize>,
 }
 
 impl ChatRequest {
@@ -66,7 +81,16 @@ impl ChatRequest {
             reasoning: None,
             response_format: None,
             model: None,
+            cache_through: None,
         }
+    }
+
+    /// Claim that the request's prefix repeats verbatim on the next call, and
+    /// ask the provider to cache through message index `n`. See the field docs
+    /// for what each protocol does with it.
+    pub fn with_cache_through(mut self, n: usize) -> Self {
+        self.cache_through = Some(n);
+        self
     }
 
     /// Set model override.

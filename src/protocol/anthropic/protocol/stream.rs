@@ -17,6 +17,7 @@ impl AnthropicProtocol {
                     completion_tokens: Some(message.usage.output_tokens),
                     total_tokens: None,
                     reasoning_tokens: None,
+                    cache_read_tokens: message.usage.cache_read_input_tokens,
                 })]
             }
             MessagesStreamEvent::ContentBlockStart {
@@ -74,6 +75,10 @@ impl AnthropicProtocol {
                     completion_tokens: Some(usage.output_tokens),
                     total_tokens: None,
                     reasoning_tokens: None,
+                    // Compatible endpoints (DashScope et al) report the cache
+                    // split here too; the aggregator keeps whichever event
+                    // carried it.
+                    cache_read_tokens: usage.cache_read_input_tokens,
                 })];
 
                 if let Some(reason) = delta.stop_reason {
