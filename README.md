@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/llm-unified.svg)](https://crates.io/crates/llm-unified)
 [![Documentation](https://docs.rs/llm-unified/badge.svg)](https://docs.rs/llm-unified)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 [![coverage](https://img.shields.io/badge/coverage-94%25-green)](CONTRIBUTING.md#coverage)
 [![CI](https://github.com/hibuka-labs/llm-providers/actions/workflows/ci.yml/badge.svg)](https://github.com/hibuka-labs/llm-providers/actions/workflows/ci.yml)
 
