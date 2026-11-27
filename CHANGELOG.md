@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-27
+
+### Changed
+- **Dual-licensed as MIT OR Apache-2.0.** The crate's license field now carries
+  both, matching the rest of the family.
+- **CI runs on every release platform.** Linux, macOS and Windows all build and
+  test; a platform-primitive gate rejects hand-rolled `HOME` lookups.
+- **Dependency patch bumps.** `clap` 4.6.7 → 4.6.8, `bytes` 1.12.1 → 1.12.2.
+
 ## [0.3.0] - 2026-11-16
 
 ### Added
